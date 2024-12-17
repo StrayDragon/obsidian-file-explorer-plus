@@ -4,6 +4,7 @@ import { around } from "monkey-around";
 import FileExplorerPlusSettingTab, { FileExplorerPlusPluginSettings, UNSEEN_FILES_DEFAULT_SETTINGS } from "./settings";
 import { addCommandsToFileMenu, addOnRename, addOnDelete, addOnTagChange, addCommands } from "./handlers";
 import { checkPathFilter, checkTagFilter, changeVirtualElementPin } from "./utils";
+import { FileExplorerToolbar } from "./ui/toolbar";
 
 export default class FileExplorerPlusPlugin extends Plugin {
     settings: FileExplorerPlusPluginSettings;
@@ -50,6 +51,10 @@ export default class FileExplorerPlusPlugin extends Plugin {
 
         const plugin = this;
         const leaf = this.app.workspace.getLeaf(true);
+
+        fileExplorer.containerEl.querySelector('.file-explorer-plus.file-explorer-toolbar')?.remove();
+        const toolbarContainer = fileExplorer.containerEl.createDiv();
+        new FileExplorerToolbar(this, toolbarContainer);
 
         this.register(
             around(Object.getPrototypeOf(fileExplorer), {
