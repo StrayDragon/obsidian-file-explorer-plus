@@ -1,5 +1,8 @@
+# user defined
+output/
+
 # vscode
-.vscode 
+.vscode
 
 # Intellij
 *.iml
