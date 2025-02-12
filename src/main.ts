@@ -3,7 +3,7 @@ import { around } from "monkey-around";
 
 import FileExplorerPlusSettingTab, { FileExplorerPlusPluginSettings, UNSEEN_FILES_DEFAULT_SETTINGS } from "./settings";
 import { addCommandsToFileMenu, addOnRename, addOnDelete, addOnTagChange, addCommands } from "./handlers";
-import { checkPathFilter, checkTagFilter, changeVirtualElementPin } from "./utils";
+import { checkPathFilter, checkTagFilter, changeVirtualElementPin, shouldHideInFocusMode } from "./utils";
 import { FileExplorerToolbar } from "./ui/toolbar";
 
 export default class FileExplorerPlusPlugin extends Plugin {
@@ -122,6 +122,15 @@ export default class FileExplorerPlusPlugin extends Plugin {
                             sortedChildren = pinnedVirtualElements.concat(notPinnedVirtualElements);
                         } else {
                             sortedChildren = sortedChildren.map((vEl) => changeVirtualElementPin(vEl, false));
+                        }
+
+
+                        if (plugin.settings.focusMode.active) {
+                            sortedChildren = sortedChildren.filter((vEl) => {
+                                const shouldHide = shouldHideInFocusMode(vEl.file.path, plugin.settings);
+                                vEl.info.hidden = shouldHide;
+                                return !shouldHide;
+                            });
                         }
 
                         return sortedChildren;

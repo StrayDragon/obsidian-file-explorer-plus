@@ -22,6 +22,10 @@ export interface PathFilter {
 
 export interface FileExplorerPlusPluginSettings {
     hideStrictPathFilters: boolean;
+    focusMode: {
+        active: boolean;
+        focusedPaths: string[];
+    };
     pinFilters: {
         active: boolean;
         tags: TagFilter[];
@@ -44,6 +48,10 @@ export interface Filter {
 
 export const UNSEEN_FILES_DEFAULT_SETTINGS: FileExplorerPlusPluginSettings = {
     hideStrictPathFilters: true,
+    focusMode: {
+        active: false,
+        focusedPaths: [],
+    },
     pinFilters: {
         active: true,
         tags: [

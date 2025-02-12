@@ -1,7 +1,7 @@
 import { TAbstractFile, TFile, TFolder, setIcon, PathVirtualElement, TagCache } from "obsidian";
 import wcmatch from "wildcard-match";
 
-import { PathFilter, TagFilter } from "./settings";
+import { FileExplorerPlusPluginSettings, PathFilter, TagFilter } from "./settings";
 
 export function changeVirtualElementPin(vEl: PathVirtualElement, pin: boolean): PathVirtualElement {
     if (pin && !vEl.el.hasClass("tree-item-pinned")) {
@@ -112,4 +112,15 @@ export function checkTagFilter(filter: TagFilter, file: TAbstractFile): boolean 
     }
 
     return false;
+}
+
+export function isFocusedPath(path: string, focusedPaths: string[]): boolean {
+    return focusedPaths.includes(path) || focusedPaths.some(focusedPath => path.startsWith(focusedPath + '/'));
+}
+
+export function shouldHideInFocusMode(path: string, settings: FileExplorerPlusPluginSettings): boolean {
+    if (!settings.focusMode.active || settings.focusMode.focusedPaths.length === 0) {
+        return false;
+    }
+    return !isFocusedPath(path, settings.focusMode.focusedPaths);
 }
