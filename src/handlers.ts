@@ -1,4 +1,4 @@
-import { TFile } from "obsidian";
+import { Menu, TFile } from "obsidian";
 
 import FileExplorerPlusPlugin from "./main";
 import { InputFilterNameModal } from "./ui/modals";
@@ -126,7 +126,34 @@ export function addOnDelete(plugin: FileExplorerPlusPlugin) {
     );
 }
 
+function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: string[]) {
+    menu.addSeparator()
+        .addItem((item) => {
+            if (!plugin.settings.focusMode.active) {
+                item.setTitle("focus on")
+                    .setIcon("square-mouse-pointer")
+                    .onClick(() => {
+                        plugin.settings.focusMode.active = true;
+                        plugin.settings.focusMode.focusedPaths = paths;
+                        plugin.saveSettings();
+                        plugin.getFileExplorer()?.requestSort();
+                    });
+            } else {
+                item.setTitle("focus off")
+                    .setIcon("square-dashed-mouse-pointer")
+                    .onClick(() => {
+                        plugin.settings.focusMode.active = false;
+                        plugin.settings.focusMode.focusedPaths = [];
+                        plugin.saveSettings();
+                        plugin.getFileExplorer()?.requestSort();
+                    });
+            }
+        });
+
+}
+
 export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
+
     plugin.registerEvent(
         plugin.app.workspace.on("file-menu", (menu, path) => {
             if (path instanceof TFile) {
@@ -282,6 +309,14 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
                         }
                     });
             }
+
+            AddFocusMenu(plugin, menu, [path.path]);
         }),
+    );
+
+    plugin.registerEvent(
+        plugin.app.workspace.on("files-menu", (menu, paths) => {
+            AddFocusMenu(plugin, menu, paths.map((v) => v.path));
+        })
     );
 }

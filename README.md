@@ -16,6 +16,7 @@ a simple click in the file menu lets you hide or pin specific files or folders.
 
 -   **Flexibility in Filtering**: Hide and pin files and folders using wildcard or regex filters for names, paths, and tags.
 -   **Quick Action**: Instantly hide or pin specific files and folders with a right-click.
+-   **Focus Mode**: Temporarily hide all files except selected ones to focus on specific content.
 -   **Efficiency**: Through monkey patching, the plugin only runs during Obsidian folder sorting or when a filter changes.
 -   **Transparency**: View the paths hidden or pinned and understand the filter behind each.
 -   **Mobile Compatibility**: This plugin supports mobile devices.
