@@ -30,13 +30,16 @@ export interface FrontMatterFilter {
 
 export interface FileExplorerPlusPluginSettings {
   hideStrictPathFilters: boolean;
+  focusMode: {
+    active: boolean;
+    focusedPaths: string[];
+  };
   pinFilters: {
     active: boolean;
     tags: TagFilter[];
     paths: PathFilter[];
     frontMatter: FrontMatterFilter[];
   };
-
   hideFilters: {
     active: boolean;
     tags: TagFilter[];
@@ -54,6 +57,10 @@ export interface Filter {
 
 export const FILE_EXPLORER_PLUS_DEFAULT_SETTINGS: FileExplorerPlusPluginSettings = {
   hideStrictPathFilters: true,
+  focusMode: {
+    active: false,
+    focusedPaths: [],
+  },
   pinFilters: {
     active: true,
     tags: [

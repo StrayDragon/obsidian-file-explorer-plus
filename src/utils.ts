@@ -1,7 +1,7 @@
 import { TAbstractFile, TFile, TFolder, setIcon, PathVirtualElement, TagCache } from "obsidian";
 import wcmatch from "wildcard-match";
 
-import { FrontMatterFilter, PathFilter, TagFilter } from "./settings";
+import { FileExplorerPlusPluginSettings, FrontMatterFilter, PathFilter, TagFilter } from "./settings";
 
 function flattenObject(obj: Record<string, any>, prefix: string = ""): Record<string, any> {
   return Object.keys(obj).reduce((acc: Record<string, any>, key: string) => {
@@ -159,4 +159,15 @@ export function checkFrontMatterFilter(filter: FrontMatterFilter, file: TAbstrac
   }
 
   return false;
+}
+
+export function isFocusedPath(path: string, focusedPaths: string[]): boolean {
+  return focusedPaths.includes(path) || focusedPaths.some((focusedPath) => path.startsWith(focusedPath + "/"));
+}
+
+export function shouldHideInFocusMode(path: string, settings: FileExplorerPlusPluginSettings): boolean {
+  if (!settings.focusMode.active || settings.focusMode.focusedPaths.length === 0) {
+    return false;
+  }
+  return !isFocusedPath(path, settings.focusMode.focusedPaths);
 }
