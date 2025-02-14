@@ -1,4 +1,4 @@
-import { Menu, TFile } from "obsidian";
+import { Menu, TAbstractFile, TFile } from "obsidian";
 
 import FileExplorerPlusPlugin from "./main";
 import { InputFilterNameModal } from "./ui/modals";
@@ -126,29 +126,28 @@ export function addOnDelete(plugin: FileExplorerPlusPlugin) {
     );
 }
 
-function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: string[]) {
-    menu.addSeparator()
-        .addItem((item) => {
-            if (!plugin.settings.focusMode.active) {
-                item.setTitle("focus on")
-                    .setIcon("square-mouse-pointer")
-                    .onClick(() => {
-                        plugin.settings.focusMode.active = true;
-                        plugin.settings.focusMode.focusedPaths = paths;
-                        plugin.saveSettings();
-                        plugin.getFileExplorer()?.requestSort();
-                    });
-            } else {
-                item.setTitle("focus off")
-                    .setIcon("square-dashed-mouse-pointer")
-                    .onClick(() => {
-                        plugin.settings.focusMode.active = false;
-                        plugin.settings.focusMode.focusedPaths = [];
-                        plugin.saveSettings();
-                        plugin.getFileExplorer()?.requestSort();
-                    });
-            }
-        });
+function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstractFile[]) {
+    menu.addItem((item) => {
+        if (!plugin.settings.focusMode.active) {
+            item.setTitle("focus on")
+                .setIcon("square-mouse-pointer")
+                .onClick(() => {
+                    plugin.settings.focusMode.active = true;
+                    plugin.settings.focusMode.focusedPaths = paths.map((p) => p instanceof TFile ? p.path : p.path + "/");
+                    plugin.saveSettings();
+                    plugin.getFileExplorer()?.requestSort();
+                });
+        } else {
+            item.setTitle("focus off")
+                .setIcon("square-dashed-mouse-pointer")
+                .onClick(() => {
+                    plugin.settings.focusMode.active = false;
+                    plugin.settings.focusMode.focusedPaths = [];
+                    plugin.saveSettings();
+                    plugin.getFileExplorer()?.requestSort();
+                });
+        }
+    });
 
 }
 
@@ -156,8 +155,9 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
 
     plugin.registerEvent(
         plugin.app.workspace.on("file-menu", (menu, path) => {
+            const thisPluginMenu = menu.addSeparator();
             if (path instanceof TFile) {
-                menu.addSeparator()
+                thisPluginMenu
                     .addItem((item) => {
                         const index = plugin.settings.pinFilters.paths.findIndex(
                             (filter) => filter.patternType === "STRICT" && filter.type === "FILES" && filter.pattern === path.path,
@@ -233,7 +233,7 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
                         }
                     });
             } else {
-                menu.addSeparator()
+                thisPluginMenu
                     .addItem((item) => {
                         const index = plugin.settings.pinFilters.paths.findIndex(
                             (filter) => filter.patternType === "STRICT" && filter.type === "DIRECTORIES" && filter.pattern === path.path,
@@ -310,13 +310,14 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
                     });
             }
 
-            AddFocusMenu(plugin, menu, [path.path]);
+            AddFocusMenu(plugin, thisPluginMenu, [path]);
         }),
     );
 
     plugin.registerEvent(
         plugin.app.workspace.on("files-menu", (menu, paths) => {
-            AddFocusMenu(plugin, menu, paths.map((v) => v.path));
+            const thisPluginMenu = menu.addSeparator();
+            AddFocusMenu(plugin, thisPluginMenu, paths);
         })
     );
 }

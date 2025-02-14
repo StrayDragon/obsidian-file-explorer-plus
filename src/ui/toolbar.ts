@@ -25,19 +25,37 @@ export class FileExplorerToolbar {
             cls: ['toolbar-button-container']
         });
 
-        const button = buttonContainer.createEl('button', {
+        // hidden switch
+        const hiddenSwitchBtn = buttonContainer.createEl('button', {
             cls: ['toolbar-button'],
-            attr: { 'aria-label': 'show/hide hidden files' }
+            attr: { 'aria-label': 'show/hide hidden files/dirs' }
         });
 
-        setIcon(button, this.hidden ? 'eye-off' : 'eye');
+        setIcon(hiddenSwitchBtn, this.hidden ? 'eye-off' : 'eye');
 
-        button.addEventListener('click', () => {
-            this.hidden = !this.hidden;
-            setIcon(button, this.hidden ? 'eye-off' : 'eye');
-
-            this.plugin.settings.hideFilters.active = this.hidden;
+        hiddenSwitchBtn.addEventListener('click', () => {
+            this.plugin.settings.hideFilters.active = !this.hidden;
             this.plugin.saveSettings();
+
+            this.hidden = this.plugin.settings.hideFilters.active;
+            setIcon(hiddenSwitchBtn, this.hidden ? 'eye-off' : 'eye');
+
+            this.plugin.getFileExplorer()?.requestSort();
+        });
+
+        // focus switch
+        const focusSwitchBtn = buttonContainer.createEl('button', {
+            cls: ['toolbar-button'],
+            attr: { 'aria-label': 'switch focus mode' }
+        });
+
+        setIcon(focusSwitchBtn, this.plugin.settings.focusMode.active ? 'square-mouse-pointer' : 'square-dashed-mouse-pointer');
+
+        focusSwitchBtn.addEventListener('click', () => {
+            this.plugin.settings.focusMode.active = !this.plugin.settings.focusMode.active;
+            this.plugin.saveSettings();
+
+            setIcon(focusSwitchBtn, this.plugin.settings.focusMode.active ? 'square-mouse-pointer' : 'square-dashed-mouse-pointer');
 
             this.plugin.getFileExplorer()?.requestSort();
         });
