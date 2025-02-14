@@ -1,6 +1,6 @@
 {
     "main": "main.js",
-    "version": "2025.2.12",
+    "version": "2025.2.14",
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && mkdir -p ./output/obsidian-file-explorer-plus/ && mv main.js ./output/obsidian-file-explorer-plus/ && cp manifest.json styles.css ./output/obsidian-file-explorer-plus/",
