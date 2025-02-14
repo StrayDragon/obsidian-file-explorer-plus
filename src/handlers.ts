@@ -131,7 +131,7 @@ export function addOnDelete(plugin: FileExplorerPlusPlugin) {
 }
 
 function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstractFile[]) {
-  menu.addSeparator().addItem((item) => {
+  menu.addItem((item) => {
     if (!plugin.settings.focusMode.active) {
       item
         .setTitle("focus on")
@@ -161,9 +161,10 @@ function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstra
 export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
   plugin.registerEvent(
     plugin.app.workspace.on("file-menu", (menu, path) => {
+      const thisPluginMenu = menu.addSeparator();
+
       if (path instanceof TFile) {
-        menu
-          .addSeparator()
+        thisPluginMenu
           .addItem((item) => {
             const index = plugin.settings.pinFilters.paths.findIndex(
               (filter) => filter.patternType === "STRICT" && filter.type === "FILES" && filter.pattern === path.path,
@@ -243,8 +244,7 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
             }
           });
       } else {
-        menu
-          .addSeparator()
+        thisPluginMenu
           .addItem((item) => {
             const index = plugin.settings.pinFilters.paths.findIndex(
               (filter) =>
@@ -327,13 +327,14 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
           });
       }
 
-      AddFocusMenu(plugin, menu, [path]);
+      AddFocusMenu(plugin, thisPluginMenu, [path]);
     }),
   );
 
   plugin.registerEvent(
     plugin.app.workspace.on("files-menu", (menu, paths) => {
-      AddFocusMenu(plugin, menu, paths);
+      const thisPluginMenu = menu.addSeparator();
+      AddFocusMenu(plugin, thisPluginMenu, paths);
     }),
   );
 }
