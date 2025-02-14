@@ -162,12 +162,16 @@ export function checkFrontMatterFilter(filter: FrontMatterFilter, file: TAbstrac
 }
 
 export function isFocusedPath(path: string, focusedPaths: string[]): boolean {
-  return focusedPaths.includes(path) || focusedPaths.some((focusedPath) => path.startsWith(focusedPath + "/"));
+  return focusedPaths.includes(path) || focusedPaths.some((focusedPath) => focusedPath.includes(path) || path.startsWith(focusedPath));
 }
 
-export function shouldHideInFocusMode(path: string, settings: FileExplorerPlusPluginSettings): boolean {
+export function shouldHideInFocusMode(af: TAbstractFile, settings: FileExplorerPlusPluginSettings): boolean {
   if (!settings.focusMode.active || settings.focusMode.focusedPaths.length === 0) {
     return false;
+  }
+  let path = af.path;
+  if (af instanceof TFolder) {
+    path += "/";
   }
   return !isFocusedPath(path, settings.focusMode.focusedPaths);
 }

@@ -143,7 +143,7 @@ export default class FileExplorerPlusPlugin extends Plugin {
 
             if (plugin.settings.focusMode.active) {
               sortedChildren = sortedChildren.filter((vEl) => {
-                const shouldHide = shouldHideInFocusMode(vEl.file.path, plugin.settings);
+                const shouldHide = shouldHideInFocusMode(vEl.file, plugin.settings);
                 vEl.info.hidden = shouldHide;
                 return !shouldHide;
               });
