@@ -1,4 +1,4 @@
-import { Menu, TFile } from "obsidian";
+import { Menu, TAbstractFile, TFile } from "obsidian";
 
 import FileExplorerPlusPlugin from "./main";
 import { InputFilterNameModal } from "./ui/modals";
@@ -126,7 +126,7 @@ export function addOnDelete(plugin: FileExplorerPlusPlugin) {
     );
 }
 
-function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: string[]) {
+function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstractFile[]) {
     menu.addSeparator()
         .addItem((item) => {
             if (!plugin.settings.focusMode.active) {
@@ -134,7 +134,7 @@ function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: string[
                     .setIcon("square-mouse-pointer")
                     .onClick(() => {
                         plugin.settings.focusMode.active = true;
-                        plugin.settings.focusMode.focusedPaths = paths;
+                        plugin.settings.focusMode.focusedPaths = paths.map((p) => p instanceof TFile ? p.path : p.path + "/");
                         plugin.saveSettings();
                         plugin.getFileExplorer()?.requestSort();
                     });
@@ -310,13 +310,13 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
                     });
             }
 
-            AddFocusMenu(plugin, menu, [path.path]);
+            AddFocusMenu(plugin, menu, [path]);
         }),
     );
 
     plugin.registerEvent(
         plugin.app.workspace.on("files-menu", (menu, paths) => {
-            AddFocusMenu(plugin, menu, paths.map((v) => v.path));
+            AddFocusMenu(plugin, menu, paths);
         })
     );
 }
