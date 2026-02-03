@@ -28,6 +28,12 @@ export interface FrontMatterFilter {
   patternType: "REGEX" | "WILDCARD" | "STRICT";
 }
 
+export interface WorkspaceFocusGroup {
+  emoji: string;
+  tooltip: string;
+  filterNames: string[];
+}
+
 export interface FileExplorerPlusPluginSettings {
   hideStrictPathFilters: boolean;
   focusMode: {
@@ -45,6 +51,11 @@ export interface FileExplorerPlusPluginSettings {
     tags: TagFilter[];
     paths: PathFilter[];
     frontMatter: FrontMatterFilter[];
+  };
+  workspaceFocus: {
+    enabled: boolean;
+    activeIndex: number | null;
+    groups: WorkspaceFocusGroup[];
   };
 }
 
@@ -119,6 +130,27 @@ export const FILE_EXPLORER_PLUS_DEFAULT_SETTINGS: FileExplorerPlusPluginSettings
       },
     ],
   },
+  workspaceFocus: {
+    enabled: true,
+    activeIndex: null,
+    groups: [
+      {
+        emoji: "!",
+        tooltip: "Workspace 1",
+        filterNames: [],
+      },
+      {
+        emoji: "?",
+        tooltip: "Workspace 2",
+        filterNames: [],
+      },
+      {
+        emoji: "x",
+        tooltip: "Workspace 3",
+        filterNames: [],
+      },
+    ],
+  },
 };
 
 export default class FileExplorerPlusSettingTab extends PluginSettingTab {
@@ -140,6 +172,40 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
     if (!this.plugin.settings.hideFilters.frontMatter) {
       this.plugin.settings.hideFilters.frontMatter = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.hideFilters.frontMatter;
     }
+
+    if (!this.plugin.settings.workspaceFocus) {
+      this.plugin.settings.workspaceFocus = {
+        enabled: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled,
+        activeIndex: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeIndex,
+        groups: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups.map((group) => ({
+          ...group,
+          filterNames: [...group.filterNames],
+        })),
+      };
+    }
+
+    if (typeof this.plugin.settings.workspaceFocus.enabled !== "boolean") {
+      this.plugin.settings.workspaceFocus.enabled = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled;
+    }
+
+    if (!this.plugin.settings.workspaceFocus.groups || this.plugin.settings.workspaceFocus.groups.length < 3) {
+      const existingGroups = this.plugin.settings.workspaceFocus.groups || [];
+      const missingGroups = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups
+        .slice(existingGroups.length, 3)
+        .map((group) => ({
+          ...group,
+          filterNames: [...group.filterNames],
+        }));
+      this.plugin.settings.workspaceFocus.groups = existingGroups.concat(missingGroups);
+    }
+
+    this.plugin.settings.workspaceFocus.groups = this.plugin.settings.workspaceFocus.groups
+      .slice(0, 3)
+      .map((group, index) => ({
+        emoji: group.emoji ?? FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index].emoji,
+        tooltip: group.tooltip ?? FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index].tooltip,
+        filterNames: Array.isArray(group.filterNames) ? group.filterNames : [],
+      }));
 
     this.containerEl.empty();
     this.containerEl.addClass("file-explorer-plus");
@@ -219,6 +285,8 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
     this.hideTagFiltersSettings();
     this.hidePathFiltersSettings();
     this.hideFrontMatterFiltersSettings();
+
+    this.workspaceFocusSettings();
   }
 
   cleanSettings() {
@@ -849,6 +917,73 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
           });
           this.plugin.saveSettings();
           this.display();
+        });
+    });
+  }
+
+  workspaceFocusSettings() {
+    this.containerEl.createEl("h2", { text: "Workspace focus", attr: { class: "settings-header" } });
+
+    new Setting(this.containerEl)
+      .setName("Enable workspace focus")
+      .setDesc("Show workspace focus buttons and apply workspace hide rules.")
+      .addToggle((toggle) => {
+        toggle
+          .setTooltip("Active")
+          .setValue(this.plugin.settings.workspaceFocus.enabled)
+          .onChange((isActive) => {
+            this.plugin.setWorkspaceFocusEnabled(isActive);
+          });
+      });
+
+    this.plugin.settings.workspaceFocus.groups.forEach((group, index) => {
+      this.containerEl.createEl("h3", { text: `Workspace ${index + 1}` });
+
+      new Setting(this.containerEl)
+        .setName("Emoji")
+        .setDesc("Shown on the toolbar button.")
+        .addText((text) => {
+          text
+            .setPlaceholder("!")
+            .setValue(group.emoji)
+            .onChange((value) => {
+              this.plugin.settings.workspaceFocus.groups[index].emoji = value.trim();
+              this.plugin.saveSettings();
+              this.plugin.refreshToolbar();
+            });
+        });
+
+      new Setting(this.containerEl)
+        .setName("Hover text")
+        .setDesc("Shown on hover and used for accessibility.")
+        .addText((text) => {
+          text
+            .setPlaceholder(`Workspace ${index + 1}`)
+            .setValue(group.tooltip)
+            .onChange((value) => {
+              this.plugin.settings.workspaceFocus.groups[index].tooltip = value.trim();
+              this.plugin.saveSettings();
+              this.plugin.refreshToolbar();
+            });
+        });
+
+      new Setting(this.containerEl)
+        .setName("Hide filter names")
+        .setDesc("Comma-separated list of hide filter names or patterns to apply.")
+        .addText((text) => {
+          text
+            .setPlaceholder("Important, Archived")
+            .setValue(group.filterNames.join(", "))
+            .onChange((value) => {
+              this.plugin.settings.workspaceFocus.groups[index].filterNames = value
+                .split(",")
+                .map((entry) => entry.trim())
+                .filter((entry) => entry.length > 0);
+              this.plugin.saveSettings();
+              if (this.plugin.settings.workspaceFocus.activeIndex === index) {
+                this.plugin.getFileExplorer()?.requestSort();
+              }
+            });
         });
     });
   }

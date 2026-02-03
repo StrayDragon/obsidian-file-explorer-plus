@@ -21,7 +21,11 @@ export class FileExplorerToolbar {
         this.containerEl.addClass("file-explorer-plus");
         this.containerEl.addClass("file-explorer-toolbar");
 
-        const buttonContainer = this.containerEl.createDiv({
+        const toolbarRow = this.containerEl.createDiv({
+            cls: ['toolbar-row']
+        });
+
+        const buttonContainer = toolbarRow.createDiv({
             cls: ['toolbar-button-container']
         });
 
@@ -59,5 +63,49 @@ export class FileExplorerToolbar {
 
             this.plugin.getFileExplorer()?.requestSort();
         });
+
+        const workspaceButtonContainer = toolbarRow.createDiv({
+            cls: ['toolbar-button-container', 'toolbar-button-container--workspace']
+        });
+
+        const workspaceButtons: HTMLButtonElement[] = [];
+        const workspaceFocusEnabled = this.plugin.settings.workspaceFocus.enabled;
+
+        const updateWorkspaceButtons = () => {
+            const activeIndex = this.plugin.settings.workspaceFocus.activeIndex;
+            workspaceButtons.forEach((button, index) => {
+                button.classList.toggle('is-active', activeIndex === index);
+            });
+        };
+
+        this.plugin.settings.workspaceFocus.groups.forEach((group, index) => {
+            const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${index + 1}`;
+            const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${index + 1}`;
+
+            const workspaceBtn = workspaceButtonContainer.createEl('button', {
+                cls: ['toolbar-button', 'workspace-button'],
+                attr: {
+                    'aria-label': tooltip,
+                    'data-tooltip-position': 'top'
+                }
+            });
+
+            workspaceBtn.setText(emoji);
+
+            if (!workspaceFocusEnabled) {
+                workspaceBtn.disabled = true;
+                workspaceBtn.classList.add('is-disabled');
+                workspaceBtn.setAttribute('aria-disabled', 'true');
+            } else {
+                workspaceBtn.addEventListener('click', () => {
+                    this.plugin.toggleWorkspaceFocus(index);
+                    updateWorkspaceButtons();
+                });
+            }
+
+            workspaceButtons.push(workspaceBtn);
+        });
+
+        updateWorkspaceButtons();
     }
 }

@@ -4,6 +4,7 @@ import { around } from "monkey-around";
 import FileExplorerPlusSettingTab, {
   FileExplorerPlusPluginSettings,
   FILE_EXPLORER_PLUS_DEFAULT_SETTINGS,
+  WorkspaceFocusGroup,
 } from "./settings";
 import { addCommandsToFileMenu, addOnRename, addOnDelete, addOnTagChange, addCommands } from "./handlers";
 import {
@@ -17,6 +18,8 @@ import { FileExplorerToolbar } from "./ui/toolbar";
 
 export default class FileExplorerPlusPlugin extends Plugin {
   settings: FileExplorerPlusPluginSettings;
+  private workspaceFocusSnapshot: Set<string> | null = null;
+  private workspaceFocusRestorePaths: Set<string> | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -69,9 +72,7 @@ export default class FileExplorerPlusPlugin extends Plugin {
     const plugin = this;
     const leaf = this.app.workspace.getLeaf(true);
 
-    fileExplorer.containerEl.querySelector(".file-explorer-plus.file-explorer-toolbar")?.remove();
-    const toolbarContainer = fileExplorer.containerEl.createDiv();
-    new FileExplorerToolbar(this, toolbarContainer);
+    this.refreshToolbar();
 
     this.register(
       around(Object.getPrototypeOf(fileExplorer), {
@@ -103,6 +104,41 @@ export default class FileExplorerPlusPlugin extends Plugin {
               });
             }
 
+            if (plugin.workspaceFocusRestorePaths && plugin.workspaceFocusRestorePaths.size > 0) {
+              sortedChildren = sortedChildren.filter((vEl) => {
+                if (plugin.workspaceFocusRestorePaths?.has(vEl.file.path)) {
+                  vEl.info.hidden = true;
+                  return false;
+                }
+
+                return true;
+              });
+
+              plugin.workspaceFocusRestorePaths = null;
+            }
+
+            const activeWorkspace = plugin.getActiveWorkspaceFocusGroup();
+            if (activeWorkspace) {
+              const workspacePathsToHide = plugin.getPathsToHideForWorkspace(paths, activeWorkspace);
+
+              const workspacePathsToHideLookup = workspacePathsToHide.reduce(
+                (acc, path) => {
+                  acc[path.path] = true;
+                  return acc;
+                },
+                {} as { [key: string]: boolean },
+              );
+
+              sortedChildren = sortedChildren.filter((vEl) => {
+                if (workspacePathsToHideLookup[vEl.file.path]) {
+                  vEl.info.hidden = true;
+                  return false;
+                } else {
+                  vEl.info.hidden = false;
+                  return true;
+                }
+              });
+            }
             // only get visible vChildren
             paths = sortedChildren.map((el) => el.file);
 
@@ -179,6 +215,44 @@ export default class FileExplorerPlusPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, FILE_EXPLORER_PLUS_DEFAULT_SETTINGS, await this.loadData());
+
+    if (!this.settings.workspaceFocus) {
+      this.settings.workspaceFocus = {
+        enabled: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled,
+        activeIndex: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeIndex,
+        groups: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups.map((group) => ({
+          ...group,
+          filterNames: [...group.filterNames],
+        })),
+      };
+    }
+
+    if (typeof this.settings.workspaceFocus.enabled !== "boolean") {
+      this.settings.workspaceFocus.enabled = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled;
+    }
+
+    if (!this.settings.workspaceFocus.groups || this.settings.workspaceFocus.groups.length < 3) {
+      const existingGroups = this.settings.workspaceFocus.groups || [];
+      const missingGroups = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups
+        .slice(existingGroups.length, 3)
+        .map((group) => ({
+          ...group,
+          filterNames: [...group.filterNames],
+        }));
+      this.settings.workspaceFocus.groups = existingGroups.concat(missingGroups);
+    }
+
+    if (
+      this.settings.workspaceFocus.activeIndex !== null &&
+      (this.settings.workspaceFocus.activeIndex < 0 ||
+        this.settings.workspaceFocus.activeIndex >= this.settings.workspaceFocus.groups.length)
+    ) {
+      this.settings.workspaceFocus.activeIndex = null;
+    }
+
+    if (!this.settings.workspaceFocus.enabled) {
+      this.settings.workspaceFocus.activeIndex = null;
+    }
   }
 
   async saveSettings() {
@@ -237,5 +311,128 @@ export default class FileExplorerPlusPlugin extends Plugin {
 
       return false;
     }) as TAbstractFile[];
+  }
+
+  getPathsToHideForWorkspace(paths: (TAbstractFile | null)[], workspace: WorkspaceFocusGroup): TAbstractFile[] {
+    const filterNames = new Set(
+      workspace.filterNames.map((name) => name.trim()).filter((name) => name.length > 0),
+    );
+
+    if (filterNames.size === 0) {
+      return [];
+    }
+
+    const pathFilters = this.settings.hideFilters.paths.filter((filter) =>
+      filterNames.has(filter.name) || filterNames.has(filter.pattern),
+    );
+    const tagFilters = this.settings.hideFilters.tags.filter((filter) =>
+      filterNames.has(filter.name) || filterNames.has(filter.pattern),
+    );
+    const frontMatterFilters = this.settings.hideFilters.frontMatter.filter((filter) =>
+      filterNames.has(filter.name) || filterNames.has(filter.pattern),
+    );
+
+    return paths.filter((path) => {
+      if (!path) {
+        return false;
+      }
+
+      const pathFilterActivated = pathFilters.some((filter) => checkPathFilter(filter, path));
+      if (pathFilterActivated) {
+        return true;
+      }
+
+      const tagFilterActivated = tagFilters.some((filter) => checkTagFilter(filter, path));
+      if (tagFilterActivated) {
+        return true;
+      }
+
+      const frontMatterFilterActivated = frontMatterFilters.some((filter) =>
+        checkFrontMatterFilter(filter, path),
+      );
+      if (frontMatterFilterActivated) {
+        return true;
+      }
+
+      return false;
+    }) as TAbstractFile[];
+  }
+
+  getActiveWorkspaceFocusGroup(): WorkspaceFocusGroup | null {
+    if (!this.settings.workspaceFocus.enabled) {
+      return null;
+    }
+
+    const activeIndex = this.settings.workspaceFocus.activeIndex;
+    if (activeIndex === null || activeIndex === undefined) {
+      return null;
+    }
+
+    return this.settings.workspaceFocus.groups[activeIndex] ?? null;
+  }
+
+  refreshToolbar() {
+    const fileExplorer = this.getFileExplorer();
+    if (!fileExplorer) {
+      return;
+    }
+
+    fileExplorer.containerEl.querySelector(".file-explorer-plus.file-explorer-toolbar")?.remove();
+    const toolbarContainer = fileExplorer.containerEl.createDiv();
+    new FileExplorerToolbar(this, toolbarContainer);
+  }
+
+  setWorkspaceFocusEnabled(enabled: boolean) {
+    this.settings.workspaceFocus.enabled = enabled;
+
+    if (!enabled) {
+      this.workspaceFocusRestorePaths = this.workspaceFocusSnapshot ? new Set(this.workspaceFocusSnapshot) : null;
+      this.workspaceFocusSnapshot = null;
+      this.settings.workspaceFocus.activeIndex = null;
+    }
+
+    this.saveSettings();
+    this.refreshToolbar();
+    this.getFileExplorer()?.requestSort();
+  }
+
+  toggleWorkspaceFocus(index: number) {
+    if (!this.settings.workspaceFocus.enabled) {
+      return;
+    }
+
+    const activeIndex = this.settings.workspaceFocus.activeIndex;
+
+    if (activeIndex === index) {
+      this.workspaceFocusRestorePaths = this.workspaceFocusSnapshot ? new Set(this.workspaceFocusSnapshot) : null;
+      this.workspaceFocusSnapshot = null;
+      this.settings.workspaceFocus.activeIndex = null;
+      this.saveSettings();
+      this.getFileExplorer()?.requestSort();
+      return;
+    }
+
+    if (activeIndex === null || activeIndex === undefined) {
+      this.workspaceFocusSnapshot = this.captureHiddenSnapshot();
+    } else if (this.workspaceFocusSnapshot) {
+      this.workspaceFocusRestorePaths = new Set(this.workspaceFocusSnapshot);
+    }
+
+    this.settings.workspaceFocus.activeIndex = index;
+    this.saveSettings();
+    this.getFileExplorer()?.requestSort();
+  }
+
+  private captureHiddenSnapshot(): Set<string> {
+    const fileExplorer = this.getFileExplorer();
+    if (!fileExplorer) {
+      return new Set();
+    }
+
+    const hiddenPaths = Object.values(fileExplorer.fileItems)
+      .filter((item) => item.info.hidden)
+      .map((item) => item.file.path);
+
+    return new Set(hiddenPaths);
   }
 }
