@@ -37,45 +37,64 @@
     }
 }
 
-.workspace-leaf[data-type="file-explorer"] {
+.file-explorer-plus-root {
     position: relative;
 
     .file-explorer-plus.file-explorer-toolbar {
-        position: fixed;
-        bottom: 40px;
-        right: 16px;
+        position: absolute;
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        left: calc(8px + env(safe-area-inset-left, 0px));
+        right: calc(8px + env(safe-area-inset-right, 0px));
         z-index: var(--layer-popover);
-        background-color: var(--background-secondary);
-        border-radius: 4px;
-        box-shadow: var(--shadow-s);
+        background-color: transparent;
+        box-shadow: none;
+        box-sizing: border-box;
+        pointer-events: none;
 
-        .toolbar-row {
+        .fep-toolbar-row {
             display: flex;
             align-items: center;
-            gap: 4px;
-            padding: 4px;
+            flex-wrap: nowrap;
+            justify-content: space-between;
+            gap: 10px;
+            width: 100%;
         }
 
-        .toolbar-button-container {
+        .fep-toolbar-button-container {
             display: flex;
-            gap: 4px;
+            align-items: center;
+            gap: 1px;
+            flex-wrap: nowrap;
+            padding: 2px;
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid color-mix(in srgb, var(--background-modifier-border), transparent 35%);
+            background-color: var(--background-secondary);
+            background-color: color-mix(in srgb, var(--background-secondary), transparent 12%);
+            box-shadow: var(--shadow-s);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            pointer-events: auto;
         }
 
-        .toolbar-button-container--workspace {
-            margin-left: auto;
+        .fep-toolbar-button-container--workspace {
+            background-color: var(--background-secondary-alt);
+            background-color: color-mix(in srgb, var(--background-secondary-alt), transparent 12%);
         }
 
-        .toolbar-button {
-            background-color: transparent;
-            border: none;
+        .fep-toolbar-button {
+            all: unset;
             cursor: pointer;
-            padding: 6px;
-            border-radius: 4px;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: var(--text-muted);
             transition: all 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
 
             &:hover {
                 background-color: var(--background-modifier-hover);
@@ -83,8 +102,8 @@
             }
 
             svg {
-                width: 18px;
-                height: 18px;
+                width: 16px;
+                height: 16px;
             }
 
             &:focus-visible {
@@ -93,17 +112,21 @@
             }
         }
 
-        .toolbar-button.workspace-button {
+        .fep-toolbar-button.fep-workspace-button {
             font-size: var(--font-ui-small);
+            font-weight: var(--font-semibold, 600);
             line-height: 1;
+            width: auto;
+            min-width: 32px;
+            padding: 0 8px;
         }
 
-        .toolbar-button.is-active {
-            background-color: var(--background-modifier-active-hover);
-            color: var(--text-normal);
+        .fep-toolbar-button.is-active {
+            background-color: var(--interactive-accent);
+            color: var(--text-on-accent);
         }
 
-        .toolbar-button.is-disabled {
+        .fep-toolbar-button.is-disabled {
             opacity: 0.5;
             cursor: not-allowed;
         }

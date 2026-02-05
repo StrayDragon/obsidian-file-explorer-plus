@@ -968,8 +968,10 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
         });
 
       new Setting(this.containerEl)
-        .setName("Hide filter names")
-        .setDesc("Comma-separated list of hide filter names or patterns to apply.")
+        .setName("Bindings")
+        .setDesc(
+          "Comma-separated list of hide filter names/patterns or exact file/folder paths to hide in this workspace. Tip: you can also right-click a file/folder in the file explorer and add/remove it from a workspace.",
+        )
         .addText((text) => {
           text
             .setPlaceholder("Important, Archived")
@@ -985,6 +987,61 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
               }
             });
         });
+
+      let pathToAdd = "";
+      new Setting(this.containerEl)
+        .setName("Add file/folder")
+        .setDesc("Add an exact path to the bindings list above.")
+        .addSearch((search) => {
+          new PathSuggest(this.app, search.inputEl);
+          search
+            .setPlaceholder("path/to/file.md")
+            .onChange((value) => {
+              pathToAdd = value;
+            });
+        })
+        .addButton((button) => {
+          button
+            .setButtonText("Add")
+            .setCta()
+            .onClick(() => {
+              const normalized = pathToAdd.trim().replace(/\/$/, "");
+              if (normalized.length === 0) {
+                return;
+              }
+
+              const bindings = this.plugin.settings.workspaceFocus.groups[index].filterNames;
+              if (!bindings.includes(normalized)) {
+                bindings.push(normalized);
+                this.plugin.saveSettings();
+                if (this.plugin.settings.workspaceFocus.activeIndex === index) {
+                  this.plugin.getFileExplorer()?.requestSort();
+                }
+                this.display();
+              }
+            });
+        });
+
+      if (group.filterNames.length > 0) {
+        this.containerEl.createEl("h4", { text: "Current bindings" });
+        group.filterNames.forEach((binding, bindingIndex) => {
+          new Setting(this.containerEl)
+            .setName(binding)
+            .addExtraButton((button) => {
+              button
+                .setIcon("cross")
+                .setTooltip("Remove")
+                .onClick(() => {
+                  this.plugin.settings.workspaceFocus.groups[index].filterNames.splice(bindingIndex, 1);
+                  this.plugin.saveSettings();
+                  if (this.plugin.settings.workspaceFocus.activeIndex === index) {
+                    this.plugin.getFileExplorer()?.requestSort();
+                  }
+                  this.display();
+                });
+            });
+        });
+      }
     });
   }
 }

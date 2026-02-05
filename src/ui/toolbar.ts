@@ -22,16 +22,16 @@ export class FileExplorerToolbar {
         this.containerEl.addClass("file-explorer-toolbar");
 
         const toolbarRow = this.containerEl.createDiv({
-            cls: ['toolbar-row']
+            cls: ['fep-toolbar-row']
         });
 
         const buttonContainer = toolbarRow.createDiv({
-            cls: ['toolbar-button-container']
+            cls: ['fep-toolbar-button-container']
         });
 
         // hidden switch
         const hiddenSwitchBtn = buttonContainer.createEl('button', {
-            cls: ['toolbar-button'],
+            cls: ['fep-toolbar-button'],
             attr: { 'aria-label': 'show/hide hidden files/dirs' }
         });
 
@@ -49,7 +49,7 @@ export class FileExplorerToolbar {
 
         // focus switch
         const focusSwitchBtn = buttonContainer.createEl('button', {
-            cls: ['toolbar-button'],
+            cls: ['fep-toolbar-button'],
             attr: { 'aria-label': 'switch focus mode' }
         });
 
@@ -65,7 +65,7 @@ export class FileExplorerToolbar {
         });
 
         const workspaceButtonContainer = toolbarRow.createDiv({
-            cls: ['toolbar-button-container', 'toolbar-button-container--workspace']
+            cls: ['fep-toolbar-button-container', 'fep-toolbar-button-container--workspace']
         });
 
         const workspaceButtons: HTMLButtonElement[] = [];
@@ -83,7 +83,7 @@ export class FileExplorerToolbar {
             const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${index + 1}`;
 
             const workspaceBtn = workspaceButtonContainer.createEl('button', {
-                cls: ['toolbar-button', 'workspace-button'],
+                cls: ['fep-toolbar-button', 'fep-workspace-button'],
                 attr: {
                     'aria-label': tooltip,
                     'data-tooltip-position': 'top'

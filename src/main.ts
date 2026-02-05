@@ -314,8 +314,12 @@ export default class FileExplorerPlusPlugin extends Plugin {
   }
 
   getPathsToHideForWorkspace(paths: (TAbstractFile | null)[], workspace: WorkspaceFocusGroup): TAbstractFile[] {
+    const bindings = Array.isArray(workspace.filterNames) ? workspace.filterNames : [];
     const filterNames = new Set(
-      workspace.filterNames.map((name) => name.trim()).filter((name) => name.length > 0),
+      bindings
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0)
+        .map((name) => (name.endsWith("/") ? name.slice(0, -1) : name)),
     );
 
     if (filterNames.size === 0) {
@@ -335,6 +339,10 @@ export default class FileExplorerPlusPlugin extends Plugin {
     return paths.filter((path) => {
       if (!path) {
         return false;
+      }
+
+      if (filterNames.has(path.path)) {
+        return true;
       }
 
       const pathFilterActivated = pathFilters.some((filter) => checkPathFilter(filter, path));
@@ -377,6 +385,7 @@ export default class FileExplorerPlusPlugin extends Plugin {
       return;
     }
 
+    fileExplorer.containerEl.classList.add("file-explorer-plus-root");
     fileExplorer.containerEl.querySelector(".file-explorer-plus.file-explorer-toolbar")?.remove();
     const toolbarContainer = fileExplorer.containerEl.createDiv();
     new FileExplorerToolbar(this, toolbarContainer);

@@ -158,6 +158,56 @@ function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstra
   });
 }
 
+function normalizeWorkspaceBinding(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+function AddWorkspaceFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstractFile[]) {
+  const workspaceFocus = plugin.settings.workspaceFocus;
+  if (!workspaceFocus?.groups || workspaceFocus.groups.length === 0) {
+    return;
+  }
+
+  const normalizedPaths = [...new Set(paths.map((path) => path.path).map(normalizeWorkspaceBinding))].filter(
+    (path) => path.length > 0,
+  );
+  if (normalizedPaths.length === 0) {
+    return;
+  }
+
+  workspaceFocus.groups.slice(0, 3).forEach((group, index) => {
+    const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${index + 1}`;
+    const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${index + 1}`;
+    const label = `${emoji} ${tooltip}`;
+
+    const existing = new Set(
+      (Array.isArray(group.filterNames) ? group.filterNames : []).map(normalizeWorkspaceBinding).filter((x) => x.length > 0),
+    );
+    const allIncluded = normalizedPaths.every((path) => existing.has(path));
+
+    menu.addItem((item) => {
+      item
+        .setTitle(`${allIncluded ? "Remove from" : "Add to"} ${label}`)
+        .setIcon(allIncluded ? "minus" : "plus")
+        .onClick(() => {
+          const next = new Set(existing);
+          normalizedPaths.forEach((path) => {
+            if (allIncluded) {
+              next.delete(path);
+            } else {
+              next.add(path);
+            }
+          });
+
+          plugin.settings.workspaceFocus.groups[index].filterNames = Array.from(next);
+          plugin.saveSettings();
+          plugin.getFileExplorer()?.requestSort();
+        });
+    });
+  });
+}
+
 export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
   plugin.registerEvent(
     plugin.app.workspace.on("file-menu", (menu, path) => {
@@ -328,6 +378,7 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
       }
 
       AddFocusMenu(plugin, thisPluginMenu, [path]);
+      AddWorkspaceFocusMenu(plugin, thisPluginMenu, [path]);
     }),
   );
 
@@ -335,6 +386,7 @@ export function addCommandsToFileMenu(plugin: FileExplorerPlusPlugin) {
     plugin.app.workspace.on("files-menu", (menu, paths) => {
       const thisPluginMenu = menu.addSeparator();
       AddFocusMenu(plugin, thisPluginMenu, paths);
+      AddWorkspaceFocusMenu(plugin, thisPluginMenu, paths);
     }),
   );
 }
