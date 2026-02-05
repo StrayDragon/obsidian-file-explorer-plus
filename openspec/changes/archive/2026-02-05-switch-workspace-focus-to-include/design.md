@@ -94,5 +94,5 @@
 
 ## Open Questions
 
-- workspace view 激活时，是否需要与 Focus Mode 做互斥（避免双重 include 造成空视图），还是允许叠加取交集？
-- 是否需要在空 workspace 激活时提供显式空状态提示（例如 toast / 小提示文案），以及提示的呈现位置？
+- **Focus Mode 互斥：** 当用户激活任意 workspace 视图时，系统会自动解除 Focus Mode（`focusMode.active = false`），避免双重过滤导致用户误以为内容丢失。
+- **空 workspace 提示：** 不额外提供 toast/占位提示；空列表即为空 workspace 的自然反馈，用户可再次点击按钮恢复默认视图。

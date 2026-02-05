@@ -3,6 +3,7 @@ import { Menu, TAbstractFile, TFile } from "obsidian";
 import FileExplorerPlusPlugin from "./main";
 import { InputFilterNameModal } from "./ui/modals";
 import { checkTagFilter } from "./utils";
+import { normalizeWorkspaceMemberPath, normalizeWorkspaceMemberPaths } from "./workspace";
 
 export function addCommands(plugin: FileExplorerPlusPlugin) {
   plugin.addCommand({
@@ -69,6 +70,37 @@ export function addOnTagChange(plugin: FileExplorerPlusPlugin) {
 export function addOnRename(plugin: FileExplorerPlusPlugin) {
   plugin.registerEvent(
     plugin.app.vault.on("rename", (path, oldPath) => {
+      const oldNormalizedPath = normalizeWorkspaceMemberPath(oldPath);
+      const newNormalizedPath = normalizeWorkspaceMemberPath(path.path);
+
+      if (oldNormalizedPath.length > 0 && newNormalizedPath.length > 0) {
+        plugin.settings.workspaceFocus.groups.forEach((group) => {
+          group.members = normalizeWorkspaceMemberPaths(
+            group.members.map((member) => {
+              if (member === oldNormalizedPath) {
+                return newNormalizedPath;
+              }
+              if (member.startsWith(oldNormalizedPath + "/")) {
+                return newNormalizedPath + member.slice(oldNormalizedPath.length);
+              }
+              return member;
+            }),
+          );
+
+          group.legacyBindings = normalizeWorkspaceMemberPaths(
+            group.legacyBindings.map((binding) => {
+              if (binding === oldNormalizedPath) {
+                return newNormalizedPath;
+              }
+              if (binding.startsWith(oldNormalizedPath + "/")) {
+                return newNormalizedPath + binding.slice(oldNormalizedPath.length);
+              }
+              return binding;
+            }),
+          );
+        });
+      }
+
       const hideFilterPreviousIndex = plugin.settings.hideFilters.paths.findIndex((pathFilter) => {
         if (pathFilter.patternType === "STRICT" && pathFilter.pattern === oldPath) {
           return true;
@@ -94,6 +126,10 @@ export function addOnRename(plugin: FileExplorerPlusPlugin) {
       }
 
       plugin.saveSettings();
+
+      if (plugin.settings.workspaceFocus.enabled && plugin.settings.workspaceFocus.activeIndex !== null) {
+        plugin.getFileExplorer()?.requestSort();
+      }
     }),
   );
 }
@@ -101,6 +137,18 @@ export function addOnRename(plugin: FileExplorerPlusPlugin) {
 export function addOnDelete(plugin: FileExplorerPlusPlugin) {
   plugin.registerEvent(
     plugin.app.vault.on("delete", (path) => {
+      const removedPrefix = normalizeWorkspaceMemberPath(path.path);
+      if (removedPrefix.length > 0) {
+        plugin.settings.workspaceFocus.groups.forEach((group) => {
+          group.members = normalizeWorkspaceMemberPaths(
+            group.members.filter((member) => member !== removedPrefix && !member.startsWith(removedPrefix + "/")),
+          );
+          group.legacyBindings = normalizeWorkspaceMemberPaths(
+            group.legacyBindings.filter((binding) => binding !== removedPrefix && !binding.startsWith(removedPrefix + "/")),
+          );
+        });
+      }
+
       const hideFilterPreviousIndex = plugin.settings.hideFilters.paths.findIndex((pathFilter) => {
         if (pathFilter.patternType === "STRICT" && pathFilter.pattern === path.path) {
           return true;
@@ -126,6 +174,10 @@ export function addOnDelete(plugin: FileExplorerPlusPlugin) {
       }
 
       plugin.saveSettings();
+
+      if (plugin.settings.workspaceFocus.enabled && plugin.settings.workspaceFocus.activeIndex !== null) {
+        plugin.getFileExplorer()?.requestSort();
+      }
     }),
   );
 }
@@ -137,6 +189,7 @@ function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstra
         .setTitle("focus on")
         .setIcon("square-mouse-pointer")
         .onClick(() => {
+          plugin.settings.workspaceFocus.activeIndex = null;
           plugin.settings.focusMode.active = true;
           plugin.settings.focusMode.focusedPaths = paths.map((path) =>
             path instanceof TFile ? path.path : path.path + "/",
@@ -158,20 +211,13 @@ function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstra
   });
 }
 
-function normalizeWorkspaceBinding(value: string): string {
-  const trimmed = value.trim();
-  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
-}
-
 function AddWorkspaceFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstractFile[]) {
   const workspaceFocus = plugin.settings.workspaceFocus;
   if (!workspaceFocus?.groups || workspaceFocus.groups.length === 0) {
     return;
   }
 
-  const normalizedPaths = [...new Set(paths.map((path) => path.path).map(normalizeWorkspaceBinding))].filter(
-    (path) => path.length > 0,
-  );
+  const normalizedPaths = normalizeWorkspaceMemberPaths(paths.map((path) => path.path));
   if (normalizedPaths.length === 0) {
     return;
   }
@@ -181,9 +227,7 @@ function AddWorkspaceFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths
     const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${index + 1}`;
     const label = `${emoji} ${tooltip}`;
 
-    const existing = new Set(
-      (Array.isArray(group.filterNames) ? group.filterNames : []).map(normalizeWorkspaceBinding).filter((x) => x.length > 0),
-    );
+    const existing = new Set(normalizeWorkspaceMemberPaths((group as any).members));
     const allIncluded = normalizedPaths.every((path) => existing.has(path));
 
     menu.addItem((item) => {
@@ -193,14 +237,18 @@ function AddWorkspaceFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths
         .onClick(() => {
           const next = new Set(existing);
           normalizedPaths.forEach((path) => {
+            const normalized = normalizeWorkspaceMemberPath(path);
+            if (normalized.length === 0) {
+              return;
+            }
             if (allIncluded) {
-              next.delete(path);
+              next.delete(normalized);
             } else {
-              next.add(path);
+              next.add(normalized);
             }
           });
 
-          plugin.settings.workspaceFocus.groups[index].filterNames = Array.from(next);
+          plugin.settings.workspaceFocus.groups[index].members = Array.from(next);
           plugin.saveSettings();
           plugin.getFileExplorer()?.requestSort();
         });

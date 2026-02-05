@@ -29,6 +29,16 @@ export class FileExplorerToolbar {
             cls: ['fep-toolbar-button-container']
         });
 
+        const workspaceButtons: HTMLButtonElement[] = [];
+        const workspaceFocusEnabled = this.plugin.settings.workspaceFocus.enabled;
+
+        const updateWorkspaceButtons = () => {
+            const activeIndex = this.plugin.settings.workspaceFocus.activeIndex;
+            workspaceButtons.forEach((button, index) => {
+                button.classList.toggle('is-active', activeIndex === index);
+            });
+        };
+
         // hidden switch
         const hiddenSwitchBtn = buttonContainer.createEl('button', {
             cls: ['fep-toolbar-button'],
@@ -53,13 +63,26 @@ export class FileExplorerToolbar {
             attr: { 'aria-label': 'switch focus mode' }
         });
 
-        setIcon(focusSwitchBtn, this.plugin.settings.focusMode.active ? 'square-mouse-pointer' : 'square-dashed-mouse-pointer');
+        const updateFocusButton = () => {
+            setIcon(
+                focusSwitchBtn,
+                this.plugin.settings.focusMode.active ? 'square-mouse-pointer' : 'square-dashed-mouse-pointer'
+            );
+        };
+
+        updateFocusButton();
 
         focusSwitchBtn.addEventListener('click', () => {
-            this.plugin.settings.focusMode.active = !this.plugin.settings.focusMode.active;
+            const shouldEnableFocus = !this.plugin.settings.focusMode.active;
+            this.plugin.settings.focusMode.active = shouldEnableFocus;
+
+            if (shouldEnableFocus) {
+                this.plugin.settings.workspaceFocus.activeIndex = null;
+            }
             this.plugin.saveSettings();
 
-            setIcon(focusSwitchBtn, this.plugin.settings.focusMode.active ? 'square-mouse-pointer' : 'square-dashed-mouse-pointer');
+            updateFocusButton();
+            updateWorkspaceButtons();
 
             this.plugin.getFileExplorer()?.requestSort();
         });
@@ -67,16 +90,6 @@ export class FileExplorerToolbar {
         const workspaceButtonContainer = toolbarRow.createDiv({
             cls: ['fep-toolbar-button-container', 'fep-toolbar-button-container--workspace']
         });
-
-        const workspaceButtons: HTMLButtonElement[] = [];
-        const workspaceFocusEnabled = this.plugin.settings.workspaceFocus.enabled;
-
-        const updateWorkspaceButtons = () => {
-            const activeIndex = this.plugin.settings.workspaceFocus.activeIndex;
-            workspaceButtons.forEach((button, index) => {
-                button.classList.toggle('is-active', activeIndex === index);
-            });
-        };
 
         this.plugin.settings.workspaceFocus.groups.forEach((group, index) => {
             const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${index + 1}`;
@@ -100,6 +113,7 @@ export class FileExplorerToolbar {
                 workspaceBtn.addEventListener('click', () => {
                     this.plugin.toggleWorkspaceFocus(index);
                     updateWorkspaceButtons();
+                    updateFocusButton();
                 });
             }
 

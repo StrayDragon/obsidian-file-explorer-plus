@@ -3,7 +3,8 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import { PathSuggest } from "./ui/suggest";
 
 import FileExplorerPlusPlugin from "./main";
-import { PathsActivatedModal } from "./ui/modals";
+import { ManageWorkspacesModal, PathsActivatedModal, WorkspaceMemberPickerModal } from "./ui/modals";
+import { normalizeWorkspaceMemberPaths } from "./workspace";
 
 export interface TagFilter {
   name: string;
@@ -31,7 +32,8 @@ export interface FrontMatterFilter {
 export interface WorkspaceFocusGroup {
   emoji: string;
   tooltip: string;
-  filterNames: string[];
+  members: string[];
+  legacyBindings: string[];
 }
 
 export interface FileExplorerPlusPluginSettings {
@@ -137,17 +139,20 @@ export const FILE_EXPLORER_PLUS_DEFAULT_SETTINGS: FileExplorerPlusPluginSettings
       {
         emoji: "!",
         tooltip: "Workspace 1",
-        filterNames: [],
+        members: [],
+        legacyBindings: [],
       },
       {
         emoji: "?",
         tooltip: "Workspace 2",
-        filterNames: [],
+        members: [],
+        legacyBindings: [],
       },
       {
         emoji: "x",
         tooltip: "Workspace 3",
-        filterNames: [],
+        members: [],
+        legacyBindings: [],
       },
     ],
   },
@@ -179,7 +184,8 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
         activeIndex: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeIndex,
         groups: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups.map((group) => ({
           ...group,
-          filterNames: [...group.filterNames],
+          members: [...group.members],
+          legacyBindings: [...group.legacyBindings],
         })),
       };
     }
@@ -194,7 +200,8 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
         .slice(existingGroups.length, 3)
         .map((group) => ({
           ...group,
-          filterNames: [...group.filterNames],
+          members: [...group.members],
+          legacyBindings: [...group.legacyBindings],
         }));
       this.plugin.settings.workspaceFocus.groups = existingGroups.concat(missingGroups);
     }
@@ -204,7 +211,8 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
       .map((group, index) => ({
         emoji: group.emoji ?? FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index].emoji,
         tooltip: group.tooltip ?? FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index].tooltip,
-        filterNames: Array.isArray(group.filterNames) ? group.filterNames : [],
+        members: normalizeWorkspaceMemberPaths((group as any).members),
+        legacyBindings: normalizeWorkspaceMemberPaths((group as any).legacyBindings),
       }));
 
     this.containerEl.empty();
@@ -922,17 +930,29 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
   }
 
   workspaceFocusSettings() {
-    this.containerEl.createEl("h2", { text: "Workspace focus", attr: { class: "settings-header" } });
+    this.containerEl.createEl("h2", { text: "Workspaces", attr: { class: "settings-header" } });
 
     new Setting(this.containerEl)
-      .setName("Enable workspace focus")
-      .setDesc("Show workspace focus buttons and apply workspace hide rules.")
+      .setName("Enable workspaces")
+      .setDesc("Show workspace buttons and filter the file explorer to show only the selected workspace's members.")
       .addToggle((toggle) => {
         toggle
           .setTooltip("Active")
           .setValue(this.plugin.settings.workspaceFocus.enabled)
           .onChange((isActive) => {
             this.plugin.setWorkspaceFocusEnabled(isActive);
+          });
+      });
+
+    new Setting(this.containerEl)
+      .setName("Manage workspaces…")
+      .setDesc("Bulk add/remove members, and cleanup invalid or legacy bindings.")
+      .addButton((button) => {
+        button
+          .setButtonText("Open")
+          .setCta()
+          .onClick(() => {
+            new ManageWorkspacesModal(this.plugin).open();
           });
       });
 
@@ -968,19 +988,18 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
         });
 
       new Setting(this.containerEl)
-        .setName("Bindings")
+        .setName("Members")
         .setDesc(
-          "Comma-separated list of hide filter names/patterns or exact file/folder paths to hide in this workspace. Tip: you can also right-click a file/folder in the file explorer and add/remove it from a workspace.",
+          "Comma-separated list of exact file/folder paths to include in this workspace. Tip: you can also right-click a file/folder in the file explorer and add/remove it from a workspace.",
         )
         .addText((text) => {
           text
-            .setPlaceholder("Important, Archived")
-            .setValue(group.filterNames.join(", "))
+            .setPlaceholder("path/to/file.md, path/to/folder")
+            .setValue(group.members.join(", "))
             .onChange((value) => {
-              this.plugin.settings.workspaceFocus.groups[index].filterNames = value
-                .split(",")
-                .map((entry) => entry.trim())
-                .filter((entry) => entry.length > 0);
+              this.plugin.settings.workspaceFocus.groups[index].members = normalizeWorkspaceMemberPaths(
+                value.split(","),
+              );
               this.plugin.saveSettings();
               if (this.plugin.settings.workspaceFocus.activeIndex === index) {
                 this.plugin.getFileExplorer()?.requestSort();
@@ -988,43 +1007,21 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
             });
         });
 
-      let pathToAdd = "";
       new Setting(this.containerEl)
-        .setName("Add file/folder")
-        .setDesc("Add an exact path to the bindings list above.")
-        .addSearch((search) => {
-          new PathSuggest(this.app, search.inputEl);
-          search
-            .setPlaceholder("path/to/file.md")
-            .onChange((value) => {
-              pathToAdd = value;
-            });
-        })
+        .setName("Add members…")
+        .setDesc("Pick multiple files/folders from a tree view.")
         .addButton((button) => {
           button
-            .setButtonText("Add")
+            .setButtonText("Select…")
             .setCta()
             .onClick(() => {
-              const normalized = pathToAdd.trim().replace(/\/$/, "");
-              if (normalized.length === 0) {
-                return;
-              }
-
-              const bindings = this.plugin.settings.workspaceFocus.groups[index].filterNames;
-              if (!bindings.includes(normalized)) {
-                bindings.push(normalized);
-                this.plugin.saveSettings();
-                if (this.plugin.settings.workspaceFocus.activeIndex === index) {
-                  this.plugin.getFileExplorer()?.requestSort();
-                }
-                this.display();
-              }
+              new WorkspaceMemberPickerModal(this.plugin, index, () => this.display()).open();
             });
         });
 
-      if (group.filterNames.length > 0) {
-        this.containerEl.createEl("h4", { text: "Current bindings" });
-        group.filterNames.forEach((binding, bindingIndex) => {
+      if (group.members.length > 0) {
+        this.containerEl.createEl("h4", { text: "Current members" });
+        group.members.forEach((binding, bindingIndex) => {
           new Setting(this.containerEl)
             .setName(binding)
             .addExtraButton((button) => {
@@ -1032,7 +1029,7 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
                 .setIcon("cross")
                 .setTooltip("Remove")
                 .onClick(() => {
-                  this.plugin.settings.workspaceFocus.groups[index].filterNames.splice(bindingIndex, 1);
+                  this.plugin.settings.workspaceFocus.groups[index].members.splice(bindingIndex, 1);
                   this.plugin.saveSettings();
                   if (this.plugin.settings.workspaceFocus.activeIndex === index) {
                     this.plugin.getFileExplorer()?.requestSort();

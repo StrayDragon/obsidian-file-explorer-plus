@@ -15,11 +15,15 @@
 - **THEN** 系统仍然使用更新后的配置渲染按钮与工作区视图
 
 ### Requirement: Activate workspace include view
-当用户点击未激活的工作区按钮时，系统 MUST 切换到该工作区的 include/whitelist 视图：文件浏览器仅显示该工作区绑定的文件/文件夹成员，并保留必要的父目录以保证树可导航。
+当用户点击未激活的工作区按钮时，系统 MUST 切换到该工作区的 include/whitelist 视图：文件浏览器仅显示该工作区绑定的文件/文件夹成员，并保留必要的父目录以保证树可导航。若 Focus Mode 处于激活状态，系统 MUST 自动解除 Focus Mode。
 
 #### Scenario: 激活工作区视图
 - **WHEN** 用户点击未激活的工作区按钮
 - **THEN** 文件浏览器仅显示该工作区绑定的成员及其父目录，并标记该工作区为激活状态
+
+#### Scenario: 激活时解除 Focus Mode
+- **WHEN** Focus Mode 处于激活状态且用户点击未激活的工作区按钮
+- **THEN** 系统解除 Focus Mode 并切换到该工作区的 include/whitelist 视图
 
 ### Requirement: Deactivate workspace include view
 当用户再次点击已激活的工作区按钮时，系统 MUST 取消激活并恢复到默认视图（展示所有文件/文件夹，受其他全局过滤功能影响的部分仍按其规则显示/隐藏）。

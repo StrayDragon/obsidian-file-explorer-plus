@@ -1,4 +1,4 @@
-import { Plugin, TAbstractFile, FileExplorerView, WorkspaceLeaf, PathVirtualElement } from "obsidian";
+import { Plugin, TAbstractFile, FileExplorerView, WorkspaceLeaf, PathVirtualElement, TFolder } from "obsidian";
 import { around } from "monkey-around";
 
 import FileExplorerPlusSettingTab, {
@@ -15,11 +15,11 @@ import {
   shouldHideInFocusMode,
 } from "./utils";
 import { FileExplorerToolbar } from "./ui/toolbar";
+import { normalizeWorkspaceMemberPaths } from "./workspace";
 
 export default class FileExplorerPlusPlugin extends Plugin {
   settings: FileExplorerPlusPluginSettings;
-  private workspaceFocusSnapshot: Set<string> | null = null;
-  private workspaceFocusRestorePaths: Set<string> | null = null;
+  private workspaceIncludeMatcherCache: { key: string; matcher: WorkspaceIncludeMatcher } | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -80,6 +80,10 @@ export default class FileExplorerPlusPlugin extends Plugin {
           return function (...args: any[]) {
             let sortedChildren: PathVirtualElement[] = old.call(this, ...args);
 
+            sortedChildren.forEach((vEl) => {
+              vEl.info.hidden = false;
+            });
+
             let paths = sortedChildren.map((el) => el.file);
 
             if (plugin.settings.hideFilters.active) {
@@ -104,39 +108,12 @@ export default class FileExplorerPlusPlugin extends Plugin {
               });
             }
 
-            if (plugin.workspaceFocusRestorePaths && plugin.workspaceFocusRestorePaths.size > 0) {
-              sortedChildren = sortedChildren.filter((vEl) => {
-                if (plugin.workspaceFocusRestorePaths?.has(vEl.file.path)) {
-                  vEl.info.hidden = true;
-                  return false;
-                }
-
-                return true;
-              });
-
-              plugin.workspaceFocusRestorePaths = null;
-            }
-
             const activeWorkspace = plugin.getActiveWorkspaceFocusGroup();
             if (activeWorkspace) {
-              const workspacePathsToHide = plugin.getPathsToHideForWorkspace(paths, activeWorkspace);
-
-              const workspacePathsToHideLookup = workspacePathsToHide.reduce(
-                (acc, path) => {
-                  acc[path.path] = true;
-                  return acc;
-                },
-                {} as { [key: string]: boolean },
-              );
-
               sortedChildren = sortedChildren.filter((vEl) => {
-                if (workspacePathsToHideLookup[vEl.file.path]) {
-                  vEl.info.hidden = true;
-                  return false;
-                } else {
-                  vEl.info.hidden = false;
-                  return true;
-                }
+                const isVisible = plugin.getWorkspaceIncludeMatcher(activeWorkspace).isVisible(vEl.file.path);
+                vEl.info.hidden = !isVisible;
+                return isVisible;
               });
             }
             // only get visible vChildren
@@ -222,7 +199,8 @@ export default class FileExplorerPlusPlugin extends Plugin {
         activeIndex: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeIndex,
         groups: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups.map((group) => ({
           ...group,
-          filterNames: [...group.filterNames],
+          members: [...group.members],
+          legacyBindings: [...group.legacyBindings],
         })),
       };
     }
@@ -237,10 +215,13 @@ export default class FileExplorerPlusPlugin extends Plugin {
         .slice(existingGroups.length, 3)
         .map((group) => ({
           ...group,
-          filterNames: [...group.filterNames],
+          members: [...group.members],
+          legacyBindings: [...group.legacyBindings],
         }));
       this.settings.workspaceFocus.groups = existingGroups.concat(missingGroups);
     }
+
+    this.migrateWorkspaceFocusBindings();
 
     if (
       this.settings.workspaceFocus.activeIndex !== null &&
@@ -253,6 +234,47 @@ export default class FileExplorerPlusPlugin extends Plugin {
     if (!this.settings.workspaceFocus.enabled) {
       this.settings.workspaceFocus.activeIndex = null;
     }
+  }
+
+  private migrateWorkspaceFocusBindings() {
+    const workspaceFocus = this.settings.workspaceFocus;
+    if (!workspaceFocus?.groups || workspaceFocus.groups.length === 0) {
+      return;
+    }
+
+    const vaultPaths = new Set(this.app.vault.getAllLoadedFiles().map((file) => file.path));
+
+    workspaceFocus.groups = workspaceFocus.groups.slice(0, 3).map((group, index) => {
+      const defaultGroup = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index];
+
+      const members =
+        (group as any).members === undefined
+          ? []
+          : normalizeWorkspaceMemberPaths((group as any).members);
+
+      const legacyBindings = normalizeWorkspaceMemberPaths((group as any).legacyBindings);
+
+      const hasNewModel = (group as any).members !== undefined;
+      const oldBindings = hasNewModel ? [] : normalizeWorkspaceMemberPaths((group as any).filterNames);
+
+      const migratedMembers = [...members];
+      const migratedLegacy = [...legacyBindings];
+
+      for (const binding of oldBindings) {
+        if (vaultPaths.has(binding)) {
+          migratedMembers.push(binding);
+        } else {
+          migratedLegacy.push(binding);
+        }
+      }
+
+      return {
+        emoji: group.emoji ?? defaultGroup.emoji,
+        tooltip: group.tooltip ?? defaultGroup.tooltip,
+        members: normalizeWorkspaceMemberPaths(migratedMembers),
+        legacyBindings: normalizeWorkspaceMemberPaths(migratedLegacy),
+      };
+    });
   }
 
   async saveSettings() {
@@ -313,57 +335,57 @@ export default class FileExplorerPlusPlugin extends Plugin {
     }) as TAbstractFile[];
   }
 
-  getPathsToHideForWorkspace(paths: (TAbstractFile | null)[], workspace: WorkspaceFocusGroup): TAbstractFile[] {
-    const bindings = Array.isArray(workspace.filterNames) ? workspace.filterNames : [];
-    const filterNames = new Set(
-      bindings
-        .map((name) => name.trim())
-        .filter((name) => name.length > 0)
-        .map((name) => (name.endsWith("/") ? name.slice(0, -1) : name)),
-    );
+  private getWorkspaceIncludeMatcher(workspace: WorkspaceFocusGroup): WorkspaceIncludeMatcher {
+    const normalizedMembers = normalizeWorkspaceMemberPaths(workspace.members);
+    const key = normalizedMembers.join("\n");
 
-    if (filterNames.size === 0) {
-      return [];
+    if (this.workspaceIncludeMatcherCache?.key === key) {
+      return this.workspaceIncludeMatcherCache.matcher;
     }
 
-    const pathFilters = this.settings.hideFilters.paths.filter((filter) =>
-      filterNames.has(filter.name) || filterNames.has(filter.pattern),
-    );
-    const tagFilters = this.settings.hideFilters.tags.filter((filter) =>
-      filterNames.has(filter.name) || filterNames.has(filter.pattern),
-    );
-    const frontMatterFilters = this.settings.hideFilters.frontMatter.filter((filter) =>
-      filterNames.has(filter.name) || filterNames.has(filter.pattern),
-    );
+    const includeFiles = new Set<string>();
+    const includeFolders = new Set<string>();
+    const ancestorFolders = new Set<string>();
 
-    return paths.filter((path) => {
-      if (!path) {
+    for (const memberPath of normalizedMembers) {
+      const af = this.app.vault.getAbstractFileByPath(memberPath);
+      if (af instanceof TFolder) {
+        includeFolders.add(memberPath);
+      } else {
+        includeFiles.add(memberPath);
+      }
+
+      let parent = memberPath;
+      while (parent.includes("/")) {
+        parent = parent.substring(0, parent.lastIndexOf("/"));
+        ancestorFolders.add(parent);
+      }
+    }
+
+    const matcher: WorkspaceIncludeMatcher = {
+      isVisible: (path: string) => {
+        if (normalizedMembers.length === 0) {
+          return false;
+        }
+
+        if (includeFiles.has(path) || includeFolders.has(path) || ancestorFolders.has(path)) {
+          return true;
+        }
+
+        let parent = path;
+        while (parent.includes("/")) {
+          parent = parent.substring(0, parent.lastIndexOf("/"));
+          if (includeFolders.has(parent)) {
+            return true;
+          }
+        }
+
         return false;
-      }
+      },
+    };
 
-      if (filterNames.has(path.path)) {
-        return true;
-      }
-
-      const pathFilterActivated = pathFilters.some((filter) => checkPathFilter(filter, path));
-      if (pathFilterActivated) {
-        return true;
-      }
-
-      const tagFilterActivated = tagFilters.some((filter) => checkTagFilter(filter, path));
-      if (tagFilterActivated) {
-        return true;
-      }
-
-      const frontMatterFilterActivated = frontMatterFilters.some((filter) =>
-        checkFrontMatterFilter(filter, path),
-      );
-      if (frontMatterFilterActivated) {
-        return true;
-      }
-
-      return false;
-    }) as TAbstractFile[];
+    this.workspaceIncludeMatcherCache = { key, matcher };
+    return matcher;
   }
 
   getActiveWorkspaceFocusGroup(): WorkspaceFocusGroup | null {
@@ -395,8 +417,6 @@ export default class FileExplorerPlusPlugin extends Plugin {
     this.settings.workspaceFocus.enabled = enabled;
 
     if (!enabled) {
-      this.workspaceFocusRestorePaths = this.workspaceFocusSnapshot ? new Set(this.workspaceFocusSnapshot) : null;
-      this.workspaceFocusSnapshot = null;
       this.settings.workspaceFocus.activeIndex = null;
     }
 
@@ -413,35 +433,22 @@ export default class FileExplorerPlusPlugin extends Plugin {
     const activeIndex = this.settings.workspaceFocus.activeIndex;
 
     if (activeIndex === index) {
-      this.workspaceFocusRestorePaths = this.workspaceFocusSnapshot ? new Set(this.workspaceFocusSnapshot) : null;
-      this.workspaceFocusSnapshot = null;
       this.settings.workspaceFocus.activeIndex = null;
       this.saveSettings();
       this.getFileExplorer()?.requestSort();
       return;
     }
 
-    if (activeIndex === null || activeIndex === undefined) {
-      this.workspaceFocusSnapshot = this.captureHiddenSnapshot();
-    } else if (this.workspaceFocusSnapshot) {
-      this.workspaceFocusRestorePaths = new Set(this.workspaceFocusSnapshot);
+    if (this.settings.focusMode.active) {
+      this.settings.focusMode.active = false;
     }
 
     this.settings.workspaceFocus.activeIndex = index;
     this.saveSettings();
     this.getFileExplorer()?.requestSort();
   }
-
-  private captureHiddenSnapshot(): Set<string> {
-    const fileExplorer = this.getFileExplorer();
-    if (!fileExplorer) {
-      return new Set();
-    }
-
-    const hiddenPaths = Object.values(fileExplorer.fileItems)
-      .filter((item) => item.info.hidden)
-      .map((item) => item.file.path);
-
-    return new Set(hiddenPaths);
-  }
 }
+
+type WorkspaceIncludeMatcher = {
+  isVisible: (path: string) => boolean;
+};
