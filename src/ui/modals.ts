@@ -255,7 +255,15 @@ export class ManageWorkspacesModal extends Modal {
     contentEl.addClass("fep-manage-workspaces-modal");
     contentEl.createEl("h2", { text: "Manage workspaces" });
 
-    const groups = this.plugin.settings.workspaceFocus.groups.slice(0, 3);
+    const groups = this.plugin.settings.workspaceFocus.groups;
+    if (groups.length === 0) {
+      contentEl.createEl("p", { text: "No workspaces available." });
+      return;
+    }
+
+    if (this.activeWorkspaceIndex >= groups.length) {
+      this.activeWorkspaceIndex = groups.length - 1;
+    }
     const groupLabels = groups.map((group, index) => {
       const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${index + 1}`;
       const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${index + 1}`;
@@ -385,7 +393,7 @@ export class ManageWorkspacesModal extends Modal {
       this.selectedMembers.clear();
       this.lastSelectedIndex = null;
       this.plugin.saveSettings();
-      if (this.plugin.settings.workspaceFocus.activeIndex === this.activeWorkspaceIndex) {
+      if (this.plugin.isWorkspaceFocusGroupActive(group.id)) {
         this.plugin.getFileExplorer()?.requestSort();
       }
       this.render();
@@ -401,7 +409,7 @@ export class ManageWorkspacesModal extends Modal {
           this.selectedMembers.clear();
           this.lastSelectedIndex = null;
           this.plugin.saveSettings();
-          if (this.plugin.settings.workspaceFocus.activeIndex === this.activeWorkspaceIndex) {
+          if (this.plugin.isWorkspaceFocusGroupActive(group.id)) {
             this.plugin.getFileExplorer()?.requestSort();
           }
           this.render();
@@ -439,7 +447,7 @@ export class ManageWorkspacesModal extends Modal {
           this.pathToAdd = "";
           this.lastSelectedIndex = null;
           this.plugin.saveSettings();
-          if (this.plugin.settings.workspaceFocus.activeIndex === this.activeWorkspaceIndex) {
+          if (this.plugin.isWorkspaceFocusGroupActive(group.id)) {
             this.plugin.getFileExplorer()?.requestSort();
           }
           this.render();
@@ -544,18 +552,21 @@ export class ManageWorkspacesModal extends Modal {
 }
 
 type WorkspacePickerNode =
-  | { kind: "folder"; path: string; name: string; folder: TFolder; children: WorkspacePickerNode[] }
-  | { kind: "file"; path: string; name: string; file: TFile };
+  | { kind: "folder"; path: string; pathLower: string; name: string; folder: TFolder; children: WorkspacePickerNode[] }
+  | { kind: "file"; path: string; pathLower: string; name: string; file: TFile };
 
 export class WorkspaceMemberPickerModal extends Modal {
   private filterText = "";
   private selectedPaths = new Set<string>();
   private collapsedFolders = new Set<string>();
   private visibleSelectablePaths: string[] = [];
+  private rootNodesCache: WorkspacePickerNode[] | null = null;
+  private allFolderPathsCache = new Set<string>();
+  private filterDebounceHandle: number | null = null;
 
   constructor(
     private plugin: FileExplorerPlusPlugin,
-    private workspaceIndex: number,
+    private workspaceGroupId: string,
     private onApply?: () => void,
   ) {
     super(plugin.app);
@@ -566,6 +577,10 @@ export class WorkspaceMemberPickerModal extends Modal {
   }
 
   onClose() {
+    if (this.filterDebounceHandle !== null) {
+      window.clearTimeout(this.filterDebounceHandle);
+      this.filterDebounceHandle = null;
+    }
     this.contentEl.empty();
   }
 
@@ -576,9 +591,16 @@ export class WorkspaceMemberPickerModal extends Modal {
     contentEl.addClass("file-explorer-plus");
     contentEl.addClass("fep-workspace-picker-modal");
 
-    const group = this.plugin.settings.workspaceFocus.groups[this.workspaceIndex];
-    const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${this.workspaceIndex + 1}`;
-    const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${this.workspaceIndex + 1}`;
+    const group = this.plugin.settings.workspaceFocus.groups.find((item) => item.id === this.workspaceGroupId);
+    if (!group) {
+      contentEl.createEl("p", { text: "Workspace not found." });
+      return;
+    }
+
+    const fallbackIndex = this.plugin.settings.workspaceFocus.groups.findIndex((item) => item.id === group.id);
+    const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${fallbackIndex + 1}`;
+    const tooltip =
+      group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${fallbackIndex + 1}`;
     contentEl.createEl("h2", { text: `Select members — ${emoji} ${tooltip}` });
 
     const normalizedMembers = normalizeWorkspaceMemberPaths(group.members);
@@ -596,21 +618,49 @@ export class WorkspaceMemberPickerModal extends Modal {
     filterInput.value = this.filterText;
     filterInput.addEventListener("input", () => {
       this.filterText = filterInput.value;
-      this.render();
+      if (this.filterDebounceHandle !== null) {
+        window.clearTimeout(this.filterDebounceHandle);
+      }
+      this.filterDebounceHandle = window.setTimeout(() => {
+        this.filterDebounceHandle = null;
+        this.render();
+      }, 120);
     });
 
     const actionsEl = headerEl.createDiv({ cls: ["fep-tree-picker-actions"] });
     const selectedCountEl = actionsEl.createDiv({ cls: ["fep-tree-picker-count"] });
+    const collapseAllButton = actionsEl.createEl("button", { text: "Collapse all" });
+    const expandAllButton = actionsEl.createEl("button", { text: "Expand all" });
     const selectAllButton = actionsEl.createEl("button", { text: "Select all" });
     const clearButton = actionsEl.createEl("button", { text: "Clear" });
     const addButton = actionsEl.createEl("button", { text: "Add selected", cls: ["mod-cta"] });
 
     const listEl = contentEl.createDiv({ cls: ["fep-tree-picker-list"] });
+    const emptyEl = contentEl.createDiv({ cls: ["fep-tree-picker-empty"] });
+    emptyEl.setText("No paths match the current filter.");
+    emptyEl.hide();
     const rowRefs = new Map<string, { rowEl: HTMLDivElement; checkboxEl: HTMLInputElement }>();
 
     const queryLower = this.filterText.trim().toLowerCase();
-    const root = this.app.vault.getRoot();
-    const nodes = this.buildNodes(root, queryLower);
+    const nodes = this.getFilteredNodes(queryLower);
+
+    if (queryLower.length === 0) {
+      collapseAllButton.disabled = this.allFolderPathsCache.size === 0;
+      expandAllButton.disabled = this.allFolderPathsCache.size === 0;
+    } else {
+      collapseAllButton.disabled = true;
+      expandAllButton.disabled = true;
+    }
+
+    collapseAllButton.addEventListener("click", () => {
+      this.collapsedFolders = new Set(this.allFolderPathsCache);
+      this.render();
+    });
+
+    expandAllButton.addEventListener("click", () => {
+      this.collapsedFolders.clear();
+      this.render();
+    });
 
     const updateHeader = () => {
       selectedCountEl.setText(`${this.selectedPaths.size} selected`);
@@ -618,6 +668,12 @@ export class WorkspaceMemberPickerModal extends Modal {
       clearButton.disabled = !hasSelection;
       addButton.disabled = !hasSelection;
       selectAllButton.disabled = this.visibleSelectablePaths.length === 0;
+      emptyEl.toggleClass("is-visible", this.visibleSelectablePaths.length === 0 && nodes.length === 0);
+      if (this.visibleSelectablePaths.length === 0 && nodes.length === 0) {
+        emptyEl.show();
+      } else {
+        emptyEl.hide();
+      }
     };
 
     const togglePathSelection = (path: string, desiredSelected?: boolean) => {
@@ -799,7 +855,7 @@ export class WorkspaceMemberPickerModal extends Modal {
 
       group.members = normalizeWorkspaceMemberPaths(normalizedMembers.concat([...this.selectedPaths]));
       this.plugin.saveSettings();
-      if (this.plugin.settings.workspaceFocus.activeIndex === this.workspaceIndex) {
+      if (this.plugin.isWorkspaceFocusGroupActive(group.id)) {
         this.plugin.getFileExplorer()?.requestSort();
       }
       this.onApply?.();
@@ -824,11 +880,13 @@ export class WorkspaceMemberPickerModal extends Modal {
     for (const child of children) {
       if (child instanceof TFolder) {
         const childNodes = this.buildNodes(child, queryLower);
-        const matchesSelf = queryLower.length === 0 || child.path.toLowerCase().includes(queryLower);
+        const childPathLower = child.path.toLowerCase();
+        const matchesSelf = queryLower.length === 0 || childPathLower.includes(queryLower);
         if (queryLower.length === 0 || matchesSelf || childNodes.length > 0) {
           nodes.push({
             kind: "folder",
             path: child.path,
+            pathLower: childPathLower,
             name: child.name,
             folder: child,
             children: childNodes,
@@ -848,12 +906,64 @@ export class WorkspaceMemberPickerModal extends Modal {
       nodes.push({
         kind: "file",
         path: child.path,
+        pathLower: child.path.toLowerCase(),
         name: child.name,
         file: child,
       });
     }
 
     return nodes;
+  }
+
+  private ensureRootNodesCache() {
+    if (this.rootNodesCache) {
+      return;
+    }
+
+    this.rootNodesCache = this.buildNodes(this.app.vault.getRoot(), "");
+    this.allFolderPathsCache = new Set<string>();
+    const walk = (nodes: WorkspacePickerNode[]) => {
+      nodes.forEach((node) => {
+        if (node.kind !== "folder") {
+          return;
+        }
+        this.allFolderPathsCache.add(node.path);
+        walk(node.children);
+      });
+    };
+    walk(this.rootNodesCache);
+  }
+
+  private getFilteredNodes(queryLower: string): WorkspacePickerNode[] {
+    this.ensureRootNodesCache();
+    if (!this.rootNodesCache) {
+      return [];
+    }
+
+    if (queryLower.length === 0) {
+      return this.rootNodesCache;
+    }
+
+    const filterNodes = (nodes: WorkspacePickerNode[]): WorkspacePickerNode[] => {
+      const filtered: WorkspacePickerNode[] = [];
+      for (const node of nodes) {
+        if (node.kind === "file") {
+          if (node.pathLower.includes(queryLower)) {
+            filtered.push(node);
+          }
+          continue;
+        }
+
+        const children = filterNodes(node.children);
+        const matchesSelf = node.pathLower.includes(queryLower);
+        if (matchesSelf || children.length > 0) {
+          filtered.push({ ...node, children });
+        }
+      }
+      return filtered;
+    };
+
+    return filterNodes(this.rootNodesCache);
   }
 }
 

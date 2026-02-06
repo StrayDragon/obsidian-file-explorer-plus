@@ -127,7 +127,7 @@ export function addOnRename(plugin: FileExplorerPlusPlugin) {
 
       plugin.saveSettings();
 
-      if (plugin.settings.workspaceFocus.enabled && plugin.settings.workspaceFocus.activeIndex !== null) {
+      if (plugin.settings.workspaceFocus.enabled && plugin.settings.workspaceFocus.activeGroupId !== null) {
         plugin.getFileExplorer()?.requestSort();
       }
     }),
@@ -175,7 +175,7 @@ export function addOnDelete(plugin: FileExplorerPlusPlugin) {
 
       plugin.saveSettings();
 
-      if (plugin.settings.workspaceFocus.enabled && plugin.settings.workspaceFocus.activeIndex !== null) {
+      if (plugin.settings.workspaceFocus.enabled && plugin.settings.workspaceFocus.activeGroupId !== null) {
         plugin.getFileExplorer()?.requestSort();
       }
     }),
@@ -189,7 +189,7 @@ function AddFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths: TAbstra
         .setTitle("focus on")
         .setIcon("square-mouse-pointer")
         .onClick(() => {
-          plugin.settings.workspaceFocus.activeIndex = null;
+          plugin.settings.workspaceFocus.activeGroupId = null;
           plugin.settings.focusMode.active = true;
           plugin.settings.focusMode.focusedPaths = paths.map((path) =>
             path instanceof TFile ? path.path : path.path + "/",
@@ -222,7 +222,7 @@ function AddWorkspaceFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths
     return;
   }
 
-  workspaceFocus.groups.slice(0, 3).forEach((group, index) => {
+  workspaceFocus.groups.forEach((group, index) => {
     const emoji = group.emoji && group.emoji.trim().length > 0 ? group.emoji.trim() : `${index + 1}`;
     const tooltip = group.tooltip && group.tooltip.trim().length > 0 ? group.tooltip.trim() : `Workspace ${index + 1}`;
     const label = `${emoji} ${tooltip}`;
@@ -248,7 +248,7 @@ function AddWorkspaceFocusMenu(plugin: FileExplorerPlusPlugin, menu: Menu, paths
             }
           });
 
-          plugin.settings.workspaceFocus.groups[index].members = Array.from(next);
+          plugin.settings.workspaceFocus.groups[index].members = normalizeWorkspaceMemberPaths(Array.from(next));
           plugin.saveSettings();
           plugin.getFileExplorer()?.requestSort();
         });

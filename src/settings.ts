@@ -30,10 +30,19 @@ export interface FrontMatterFilter {
 }
 
 export interface WorkspaceFocusGroup {
+  id: string;
   emoji: string;
   tooltip: string;
   members: string[];
   legacyBindings: string[];
+}
+
+export interface WorkspaceFocusSettings {
+  enabled: boolean;
+  reorderOnShortcutClick: boolean;
+  activeGroupId: string | null;
+  recentGroupIds: string[];
+  groups: WorkspaceFocusGroup[];
 }
 
 export interface FileExplorerPlusPluginSettings {
@@ -54,11 +63,7 @@ export interface FileExplorerPlusPluginSettings {
     paths: PathFilter[];
     frontMatter: FrontMatterFilter[];
   };
-  workspaceFocus: {
-    enabled: boolean;
-    activeIndex: number | null;
-    groups: WorkspaceFocusGroup[];
-  };
+  workspaceFocus: WorkspaceFocusSettings;
 }
 
 export interface Filter {
@@ -134,21 +139,26 @@ export const FILE_EXPLORER_PLUS_DEFAULT_SETTINGS: FileExplorerPlusPluginSettings
   },
   workspaceFocus: {
     enabled: true,
-    activeIndex: null,
+    reorderOnShortcutClick: false,
+    activeGroupId: null,
+    recentGroupIds: [],
     groups: [
       {
+        id: "workspace-1",
         emoji: "!",
         tooltip: "Workspace 1",
         members: [],
         legacyBindings: [],
       },
       {
+        id: "workspace-2",
         emoji: "?",
         tooltip: "Workspace 2",
         members: [],
         legacyBindings: [],
       },
       {
+        id: "workspace-3",
         emoji: "x",
         tooltip: "Workspace 3",
         members: [],
@@ -181,7 +191,9 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
     if (!this.plugin.settings.workspaceFocus) {
       this.plugin.settings.workspaceFocus = {
         enabled: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled,
-        activeIndex: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeIndex,
+        reorderOnShortcutClick: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.reorderOnShortcutClick,
+        activeGroupId: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeGroupId,
+        recentGroupIds: [...FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.recentGroupIds],
         groups: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups.map((group) => ({
           ...group,
           members: [...group.members],
@@ -194,26 +206,7 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
       this.plugin.settings.workspaceFocus.enabled = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled;
     }
 
-    if (!this.plugin.settings.workspaceFocus.groups || this.plugin.settings.workspaceFocus.groups.length < 3) {
-      const existingGroups = this.plugin.settings.workspaceFocus.groups || [];
-      const missingGroups = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups
-        .slice(existingGroups.length, 3)
-        .map((group) => ({
-          ...group,
-          members: [...group.members],
-          legacyBindings: [...group.legacyBindings],
-        }));
-      this.plugin.settings.workspaceFocus.groups = existingGroups.concat(missingGroups);
-    }
-
-    this.plugin.settings.workspaceFocus.groups = this.plugin.settings.workspaceFocus.groups
-      .slice(0, 3)
-      .map((group, index) => ({
-        emoji: group.emoji ?? FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index].emoji,
-        tooltip: group.tooltip ?? FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index].tooltip,
-        members: normalizeWorkspaceMemberPaths((group as any).members),
-        legacyBindings: normalizeWorkspaceMemberPaths((group as any).legacyBindings),
-      }));
+    this.plugin.ensureWorkspaceFocusSettings();
 
     this.containerEl.empty();
     this.containerEl.addClass("file-explorer-plus");
@@ -945,6 +938,20 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
       });
 
     new Setting(this.containerEl)
+      .setName("Promote from shortcuts")
+      .setDesc("When enabled, clicking one of the first 3 workspace buttons also promotes it to the most-recent order.")
+      .addToggle((toggle) => {
+        toggle
+          .setTooltip("Active")
+          .setValue(this.plugin.settings.workspaceFocus.reorderOnShortcutClick)
+          .onChange((isActive) => {
+            this.plugin.settings.workspaceFocus.reorderOnShortcutClick = isActive;
+            this.plugin.saveSettings();
+            this.plugin.refreshToolbar();
+          });
+      });
+
+    new Setting(this.containerEl)
       .setName("Manage workspaces…")
       .setDesc("Bulk add/remove members, and cleanup invalid or legacy bindings.")
       .addButton((button) => {
@@ -956,8 +963,82 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
           });
       });
 
+    new Setting(this.containerEl)
+      .setName("Workspace groups")
+      .setDesc("Create, reorder and remove workspace groups.")
+      .addButton((button) => {
+        button
+          .setButtonText("Add workspace")
+          .setCta()
+          .onClick(() => {
+            this.plugin.settings.workspaceFocus.groups.push(this.plugin.createWorkspaceFocusGroup());
+            this.plugin.saveSettings();
+            this.plugin.refreshToolbar();
+            this.display();
+          });
+      });
+
     this.plugin.settings.workspaceFocus.groups.forEach((group, index) => {
-      this.containerEl.createEl("h3", { text: `Workspace ${index + 1}` });
+      new Setting(this.containerEl)
+        .setName(`Workspace ${index + 1}`)
+        .setDesc(`ID: ${group.id}`)
+        .addExtraButton((button) => {
+          button
+            .setIcon("arrow-up")
+            .setTooltip("Move up")
+            .setDisabled(index === 0)
+            .onClick(() => {
+              if (index === 0) {
+                return;
+              }
+
+              const groups = this.plugin.settings.workspaceFocus.groups;
+              const current = groups[index];
+              groups[index] = groups[index - 1];
+              groups[index - 1] = current;
+
+              this.plugin.saveSettings();
+              this.plugin.refreshToolbar();
+              this.display();
+            });
+        })
+        .addExtraButton((button) => {
+          button
+            .setIcon("arrow-down")
+            .setTooltip("Move down")
+            .setDisabled(index >= this.plugin.settings.workspaceFocus.groups.length - 1)
+            .onClick(() => {
+              const groups = this.plugin.settings.workspaceFocus.groups;
+              if (index >= groups.length - 1) {
+                return;
+              }
+
+              const current = groups[index];
+              groups[index] = groups[index + 1];
+              groups[index + 1] = current;
+
+              this.plugin.saveSettings();
+              this.plugin.refreshToolbar();
+              this.display();
+            });
+        })
+        .addExtraButton((button) => {
+          button
+            .setIcon("trash")
+            .setTooltip("Delete workspace")
+            .setDisabled(this.plugin.settings.workspaceFocus.groups.length <= 1)
+            .onClick(() => {
+              if (this.plugin.settings.workspaceFocus.groups.length <= 1) {
+                return;
+              }
+
+              this.plugin.removeWorkspaceFocusGroup(group.id);
+              this.plugin.saveSettings();
+              this.plugin.refreshToolbar();
+              this.plugin.getFileExplorer()?.requestSort();
+              this.display();
+            });
+        });
 
       new Setting(this.containerEl)
         .setName("Emoji")
@@ -1001,7 +1082,7 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
                 value.split(","),
               );
               this.plugin.saveSettings();
-              if (this.plugin.settings.workspaceFocus.activeIndex === index) {
+              if (this.plugin.isWorkspaceFocusGroupActive(group.id)) {
                 this.plugin.getFileExplorer()?.requestSort();
               }
             });
@@ -1015,7 +1096,7 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
             .setButtonText("Select…")
             .setCta()
             .onClick(() => {
-              new WorkspaceMemberPickerModal(this.plugin, index, () => this.display()).open();
+              new WorkspaceMemberPickerModal(this.plugin, group.id, () => this.display()).open();
             });
         });
 
@@ -1031,7 +1112,7 @@ export default class FileExplorerPlusSettingTab extends PluginSettingTab {
                 .onClick(() => {
                   this.plugin.settings.workspaceFocus.groups[index].members.splice(bindingIndex, 1);
                   this.plugin.saveSettings();
-                  if (this.plugin.settings.workspaceFocus.activeIndex === index) {
+                  if (this.plugin.isWorkspaceFocusGroupActive(group.id)) {
                     this.plugin.getFileExplorer()?.requestSort();
                   }
                   this.display();

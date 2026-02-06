@@ -21,6 +21,222 @@ export default class FileExplorerPlusPlugin extends Plugin {
   settings: FileExplorerPlusPluginSettings;
   private workspaceIncludeMatcherCache: { key: string; matcher: WorkspaceIncludeMatcher } | null = null;
 
+  createWorkspaceFocusGroup(): WorkspaceFocusGroup {
+    const groups = this.settings?.workspaceFocus?.groups ?? [];
+    const id = this.getNextWorkspaceFocusGroupId(groups);
+    const nextNumber = groups.length + 1;
+
+    return {
+      id,
+      emoji: String(nextNumber),
+      tooltip: `Workspace ${nextNumber}`,
+      members: [],
+      legacyBindings: [],
+    };
+  }
+
+  ensureWorkspaceFocusSettings() {
+    const workspaceFocusAny = (this.settings as any).workspaceFocus as any;
+    const defaults = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus;
+
+    const rawGroups = Array.isArray(workspaceFocusAny?.groups) ? workspaceFocusAny.groups : [];
+    let groups: WorkspaceFocusGroup[] = rawGroups.map((group: any, index: number) =>
+      this.normalizeWorkspaceFocusGroup(group, index),
+    );
+
+    if (groups.length === 0) {
+      groups = defaults.groups.map((group: WorkspaceFocusGroup) => ({
+        ...group,
+        members: [...group.members],
+        legacyBindings: [...group.legacyBindings],
+      }));
+    }
+
+    const seenIds = new Set<string>();
+    groups = groups.map((group: WorkspaceFocusGroup) => {
+      if (!group.id || seenIds.has(group.id)) {
+        group.id = this.getNextWorkspaceFocusGroupId(groups, seenIds);
+      }
+      seenIds.add(group.id);
+      return group;
+    });
+
+    const enabled = typeof workspaceFocusAny?.enabled === "boolean" ? workspaceFocusAny.enabled : defaults.enabled;
+
+    const reorderOnShortcutClick =
+      typeof workspaceFocusAny?.reorderOnShortcutClick === "boolean"
+        ? workspaceFocusAny.reorderOnShortcutClick
+        : defaults.reorderOnShortcutClick;
+
+    let activeGroupId: string | null =
+      typeof workspaceFocusAny?.activeGroupId === "string" && workspaceFocusAny.activeGroupId.length > 0
+        ? workspaceFocusAny.activeGroupId
+        : null;
+
+    if (!activeGroupId && typeof workspaceFocusAny?.activeIndex === "number") {
+      const fromIndex = groups[workspaceFocusAny.activeIndex];
+      activeGroupId = fromIndex?.id ?? null;
+    }
+
+    if (activeGroupId && !groups.some((group: WorkspaceFocusGroup) => group.id === activeGroupId)) {
+      activeGroupId = null;
+    }
+
+    if (!enabled) {
+      activeGroupId = null;
+    }
+
+    const rawRecent = Array.isArray(workspaceFocusAny?.recentGroupIds) ? workspaceFocusAny.recentGroupIds : [];
+    const recentGroupIds: string[] = [];
+    const knownIds = new Set(groups.map((group: WorkspaceFocusGroup) => group.id));
+    for (const id of rawRecent) {
+      if (typeof id !== "string" || id.length === 0 || !knownIds.has(id) || recentGroupIds.includes(id)) {
+        continue;
+      }
+      recentGroupIds.push(id);
+    }
+
+    if (activeGroupId) {
+      const activeIndex = recentGroupIds.indexOf(activeGroupId);
+      if (activeIndex !== -1) {
+        recentGroupIds.splice(activeIndex, 1);
+      }
+      recentGroupIds.unshift(activeGroupId);
+    }
+
+    this.settings.workspaceFocus = {
+      enabled,
+      reorderOnShortcutClick,
+      activeGroupId,
+      recentGroupIds,
+      groups,
+    };
+  }
+
+  removeWorkspaceFocusGroup(groupId: string) {
+    const groups = this.settings.workspaceFocus.groups;
+    const removeIndex = groups.findIndex((group) => group.id === groupId);
+    if (removeIndex === -1) {
+      return;
+    }
+
+    groups.splice(removeIndex, 1);
+    if (groups.length === 0) {
+      groups.push(this.createWorkspaceFocusGroup());
+    }
+
+    if (this.settings.workspaceFocus.activeGroupId === groupId) {
+      this.settings.workspaceFocus.activeGroupId = null;
+    }
+
+    this.settings.workspaceFocus.recentGroupIds = this.settings.workspaceFocus.recentGroupIds.filter(
+      (id) => id !== groupId,
+    );
+  }
+
+  isWorkspaceFocusGroupActive(groupId: string): boolean {
+    return this.settings.workspaceFocus.activeGroupId === groupId;
+  }
+
+  getWorkspaceFocusDisplayGroups(): WorkspaceFocusGroup[] {
+    const groups = this.settings.workspaceFocus.groups;
+    const groupIndexById = new Map<string, number>();
+    groups.forEach((group, index) => {
+      groupIndexById.set(group.id, index);
+    });
+
+    const recentIndexById = new Map<string, number>();
+    this.settings.workspaceFocus.recentGroupIds.forEach((id, index) => {
+      recentIndexById.set(id, index);
+    });
+
+    return groups.slice().sort((a, b) => {
+      const aRecent = recentIndexById.get(a.id);
+      const bRecent = recentIndexById.get(b.id);
+
+      if (aRecent !== undefined && bRecent !== undefined) {
+        return aRecent - bRecent;
+      }
+
+      if (aRecent !== undefined) {
+        return -1;
+      }
+
+      if (bRecent !== undefined) {
+        return 1;
+      }
+
+      return (groupIndexById.get(a.id) ?? 0) - (groupIndexById.get(b.id) ?? 0);
+    });
+  }
+
+  toggleWorkspaceFocusById(groupId: string, options: ToggleWorkspaceFocusOptions = {}) {
+    if (!this.settings.workspaceFocus.enabled) {
+      return;
+    }
+
+    const shouldPromoteRecent = options.promoteRecent ?? true;
+    const shouldRefreshToolbar = options.refreshToolbar ?? true;
+
+    const hasGroup = this.settings.workspaceFocus.groups.some((group) => group.id === groupId);
+    if (!hasGroup) {
+      return;
+    }
+
+    if (this.settings.workspaceFocus.activeGroupId === groupId) {
+      this.settings.workspaceFocus.activeGroupId = null;
+      this.saveSettings();
+      if (shouldRefreshToolbar) {
+        this.refreshToolbar();
+      }
+      this.getFileExplorer()?.requestSort();
+      return;
+    }
+
+    if (this.settings.focusMode.active) {
+      this.settings.focusMode.active = false;
+    }
+
+    this.settings.workspaceFocus.activeGroupId = groupId;
+    if (shouldPromoteRecent) {
+      this.settings.workspaceFocus.recentGroupIds = [
+        groupId,
+        ...this.settings.workspaceFocus.recentGroupIds.filter((id) => id !== groupId),
+      ];
+    }
+
+    this.saveSettings();
+    if (shouldRefreshToolbar) {
+      this.refreshToolbar();
+    }
+    this.getFileExplorer()?.requestSort();
+  }
+
+  private getNextWorkspaceFocusGroupId(groups: WorkspaceFocusGroup[], reservedIds: Set<string> = new Set()): string {
+    const existingIds = new Set(groups.map((group) => group.id));
+    let index = 1;
+    while (existingIds.has(`workspace-${index}`) || reservedIds.has(`workspace-${index}`)) {
+      index += 1;
+    }
+    return `workspace-${index}`;
+  }
+
+  private normalizeWorkspaceFocusGroup(group: any, index: number): WorkspaceFocusGroup {
+    const defaultGroup = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index];
+    const fallbackEmoji = defaultGroup?.emoji ?? String(index + 1);
+    const fallbackTooltip = defaultGroup?.tooltip ?? `Workspace ${index + 1}`;
+
+    const id = typeof group?.id === "string" && group.id.trim().length > 0 ? group.id.trim() : "";
+
+    return {
+      id,
+      emoji: typeof group?.emoji === "string" ? group.emoji : fallbackEmoji,
+      tooltip: typeof group?.tooltip === "string" ? group.tooltip : fallbackTooltip,
+      members: normalizeWorkspaceMemberPaths((group as any)?.members),
+      legacyBindings: normalizeWorkspaceMemberPaths((group as any)?.legacyBindings),
+    };
+  }
+
   async onload() {
     await this.loadSettings();
 
@@ -196,7 +412,9 @@ export default class FileExplorerPlusPlugin extends Plugin {
     if (!this.settings.workspaceFocus) {
       this.settings.workspaceFocus = {
         enabled: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled,
-        activeIndex: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeIndex,
+        reorderOnShortcutClick: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.reorderOnShortcutClick,
+        activeGroupId: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.activeGroupId,
+        recentGroupIds: [...FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.recentGroupIds],
         groups: FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups.map((group) => ({
           ...group,
           members: [...group.members],
@@ -205,35 +423,9 @@ export default class FileExplorerPlusPlugin extends Plugin {
       };
     }
 
-    if (typeof this.settings.workspaceFocus.enabled !== "boolean") {
-      this.settings.workspaceFocus.enabled = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.enabled;
-    }
-
-    if (!this.settings.workspaceFocus.groups || this.settings.workspaceFocus.groups.length < 3) {
-      const existingGroups = this.settings.workspaceFocus.groups || [];
-      const missingGroups = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups
-        .slice(existingGroups.length, 3)
-        .map((group) => ({
-          ...group,
-          members: [...group.members],
-          legacyBindings: [...group.legacyBindings],
-        }));
-      this.settings.workspaceFocus.groups = existingGroups.concat(missingGroups);
-    }
-
+    this.ensureWorkspaceFocusSettings();
     this.migrateWorkspaceFocusBindings();
-
-    if (
-      this.settings.workspaceFocus.activeIndex !== null &&
-      (this.settings.workspaceFocus.activeIndex < 0 ||
-        this.settings.workspaceFocus.activeIndex >= this.settings.workspaceFocus.groups.length)
-    ) {
-      this.settings.workspaceFocus.activeIndex = null;
-    }
-
-    if (!this.settings.workspaceFocus.enabled) {
-      this.settings.workspaceFocus.activeIndex = null;
-    }
+    this.ensureWorkspaceFocusSettings();
   }
 
   private migrateWorkspaceFocusBindings() {
@@ -244,9 +436,7 @@ export default class FileExplorerPlusPlugin extends Plugin {
 
     const vaultPaths = new Set(this.app.vault.getAllLoadedFiles().map((file) => file.path));
 
-    workspaceFocus.groups = workspaceFocus.groups.slice(0, 3).map((group, index) => {
-      const defaultGroup = FILE_EXPLORER_PLUS_DEFAULT_SETTINGS.workspaceFocus.groups[index];
-
+    workspaceFocus.groups = workspaceFocus.groups.map((group, index) => {
       const members =
         (group as any).members === undefined
           ? []
@@ -269,8 +459,9 @@ export default class FileExplorerPlusPlugin extends Plugin {
       }
 
       return {
-        emoji: group.emoji ?? defaultGroup.emoji,
-        tooltip: group.tooltip ?? defaultGroup.tooltip,
+        id: group.id,
+        emoji: group.emoji,
+        tooltip: group.tooltip,
         members: normalizeWorkspaceMemberPaths(migratedMembers),
         legacyBindings: normalizeWorkspaceMemberPaths(migratedLegacy),
       };
@@ -393,12 +584,12 @@ export default class FileExplorerPlusPlugin extends Plugin {
       return null;
     }
 
-    const activeIndex = this.settings.workspaceFocus.activeIndex;
-    if (activeIndex === null || activeIndex === undefined) {
+    const activeGroupId = this.settings.workspaceFocus.activeGroupId;
+    if (!activeGroupId) {
       return null;
     }
 
-    return this.settings.workspaceFocus.groups[activeIndex] ?? null;
+    return this.settings.workspaceFocus.groups.find((group) => group.id === activeGroupId) ?? null;
   }
 
   refreshToolbar() {
@@ -417,7 +608,7 @@ export default class FileExplorerPlusPlugin extends Plugin {
     this.settings.workspaceFocus.enabled = enabled;
 
     if (!enabled) {
-      this.settings.workspaceFocus.activeIndex = null;
+      this.settings.workspaceFocus.activeGroupId = null;
     }
 
     this.saveSettings();
@@ -426,28 +617,22 @@ export default class FileExplorerPlusPlugin extends Plugin {
   }
 
   toggleWorkspaceFocus(index: number) {
-    if (!this.settings.workspaceFocus.enabled) {
+    const group = this.settings.workspaceFocus.groups[index];
+    if (!group) {
       return;
     }
 
-    const activeIndex = this.settings.workspaceFocus.activeIndex;
-
-    if (activeIndex === index) {
-      this.settings.workspaceFocus.activeIndex = null;
-      this.saveSettings();
-      this.getFileExplorer()?.requestSort();
-      return;
-    }
-
-    if (this.settings.focusMode.active) {
-      this.settings.focusMode.active = false;
-    }
-
-    this.settings.workspaceFocus.activeIndex = index;
-    this.saveSettings();
-    this.getFileExplorer()?.requestSort();
+    this.toggleWorkspaceFocusById(group.id, {
+      promoteRecent: this.settings.workspaceFocus.reorderOnShortcutClick,
+      refreshToolbar: this.settings.workspaceFocus.reorderOnShortcutClick,
+    });
   }
 }
+
+type ToggleWorkspaceFocusOptions = {
+  promoteRecent?: boolean;
+  refreshToolbar?: boolean;
+};
 
 type WorkspaceIncludeMatcher = {
   isVisible: (path: string) => boolean;
